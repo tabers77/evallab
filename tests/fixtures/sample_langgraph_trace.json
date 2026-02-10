@@ -1,0 +1,181 @@
+{
+  "thread_id": "test-thread-001",
+  "metadata": {
+    "task": "What is the revenue for TestCorp?",
+    "graph_name": "sales_agent"
+  },
+  "events": [
+    {
+      "event": "on_chain_start",
+      "name": "agent",
+      "run_id": "run-001",
+      "timestamp": "2025-01-15T10:00:00Z",
+      "data": {
+        "input": {
+          "messages": [
+            {"role": "user", "content": "What is the revenue for TestCorp?"}
+          ]
+        }
+      }
+    },
+    {
+      "event": "on_chat_model_start",
+      "name": "ChatOpenAI",
+      "run_id": "run-002",
+      "timestamp": "2025-01-15T10:00:01Z",
+      "data": {
+        "input": {
+          "messages": [
+            [{"role": "system", "content": "You are a helpful finance agent."}],
+            [{"role": "user", "content": "What is the revenue for TestCorp?"}]
+          ]
+        }
+      },
+      "metadata": {
+        "ls_model_name": "gpt-4o",
+        "ls_model_type": "chat"
+      }
+    },
+    {
+      "event": "on_chat_model_end",
+      "name": "ChatOpenAI",
+      "run_id": "run-002",
+      "timestamp": "2025-01-15T10:00:03Z",
+      "data": {
+        "output": {
+          "content": "",
+          "tool_calls": [
+            {
+              "name": "get_revenue",
+              "args": {"customer": "TestCorp", "year": 2024},
+              "id": "tc-001"
+            }
+          ]
+        },
+        "usage": {
+          "prompt_tokens": 150,
+          "completion_tokens": 30
+        }
+      }
+    },
+    {
+      "event": "on_tool_start",
+      "name": "get_revenue",
+      "run_id": "run-003",
+      "timestamp": "2025-01-15T10:00:04Z",
+      "data": {
+        "input": {"customer": "TestCorp", "year": 2024}
+      }
+    },
+    {
+      "event": "on_tool_end",
+      "name": "get_revenue",
+      "run_id": "run-003",
+      "timestamp": "2025-01-15T10:00:06Z",
+      "data": {
+        "output": "{\"revenue\": 283399382.94, \"currency\": \"EUR\", \"year\": 2024}"
+      }
+    },
+    {
+      "event": "on_tool_start",
+      "name": "plot_bar_chart",
+      "run_id": "run-004",
+      "timestamp": "2025-01-15T10:00:07Z",
+      "data": {
+        "input": {"data": [283399382.94], "labels": ["TestCorp"]}
+      }
+    },
+    {
+      "event": "on_tool_end",
+      "name": "plot_bar_chart",
+      "run_id": "run-004",
+      "timestamp": "2025-01-15T10:00:08Z",
+      "data": {
+        "output": "Chart generated successfully"
+      }
+    },
+    {
+      "event": "on_chat_model_start",
+      "name": "ChatOpenAI",
+      "run_id": "run-005",
+      "timestamp": "2025-01-15T10:00:09Z",
+      "data": {
+        "input": {
+          "messages": []
+        }
+      },
+      "metadata": {
+        "ls_model_name": "gpt-4o",
+        "ls_model_type": "chat"
+      }
+    },
+    {
+      "event": "on_chat_model_end",
+      "name": "ChatOpenAI",
+      "run_id": "run-005",
+      "timestamp": "2025-01-15T10:00:11Z",
+      "data": {
+        "output": {
+          "content": "The revenue for TestCorp in 2024 is approximately 283M EUR (283,399,382.94 EUR). I've also generated a bar chart for visualization."
+        },
+        "usage": {
+          "prompt_tokens": 250,
+          "completion_tokens": 45
+        }
+      }
+    },
+    {
+      "event": "on_chain_end",
+      "name": "agent",
+      "run_id": "run-001",
+      "timestamp": "2025-01-15T10:00:12Z",
+      "data": {
+        "output": {
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "The revenue for TestCorp in 2024 is approximately 283M EUR (283,399,382.94 EUR). I've also generated a bar chart for visualization."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "checkpoints": [
+    {
+      "checkpoint_id": "cp-001",
+      "timestamp": "2025-01-15T10:00:00Z",
+      "channel_values": {
+        "messages": [
+          {"role": "user", "content": "What is the revenue for TestCorp?"}
+        ]
+      },
+      "metadata": {"step": 0}
+    },
+    {
+      "checkpoint_id": "cp-002",
+      "timestamp": "2025-01-15T10:00:06Z",
+      "channel_values": {
+        "messages": [
+          {"role": "user", "content": "What is the revenue for TestCorp?"},
+          {"role": "assistant", "content": "", "tool_calls": [{"name": "get_revenue"}]},
+          {"role": "tool", "content": "{\"revenue\": 283399382.94}", "name": "get_revenue"}
+        ]
+      },
+      "metadata": {"step": 1}
+    },
+    {
+      "checkpoint_id": "cp-003",
+      "timestamp": "2025-01-15T10:00:12Z",
+      "channel_values": {
+        "messages": [
+          {"role": "user", "content": "What is the revenue for TestCorp?"},
+          {"role": "assistant", "content": "", "tool_calls": [{"name": "get_revenue"}]},
+          {"role": "tool", "content": "{\"revenue\": 283399382.94}", "name": "get_revenue"},
+          {"role": "assistant", "content": "The revenue for TestCorp in 2024 is approximately 283M EUR."}
+        ]
+      },
+      "metadata": {"step": 2}
+    }
+  ]
+}

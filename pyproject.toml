@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-eval"
+version = "0.1.0"
+description = "Framework-agnostic LLM/Agent evaluator with RL support"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "SalesNegotiator Team" }]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "black>=24.0",
+    "ruff>=0.3",
+]
+rl = [
+    "trl>=0.8",
+    "torch>=2.0",
+    "numpy>=1.24",
+]
+deepeval = [
+    "deepeval>=1.0",
+]
+ragas = [
+    "ragas>=0.1",
+]
+all = [
+    "agent-eval[dev,rl,deepeval,ragas]",
+]
+
+[project.scripts]
+agent-eval = "agent_eval.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_eval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: pure logic tests, no external calls",
+    "smoke: fast pre-deployment checks",
+    "integration: tests that make LLM or external calls",
+    "e2e: full orchestration pipeline tests",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
