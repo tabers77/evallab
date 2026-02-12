@@ -33,6 +33,7 @@ agent_eval/
     reporting/      # Text, JSON, HTML report formatters
     cli/            # Command-line interface (evaluate, compare, serve)
     utils/          # Embeddings, cosine similarity
+    experimental/   # PPE reward model benchmarking (arXiv:2410.14872)
 ```
 
 ### Core Concepts
@@ -48,7 +49,7 @@ agent_eval/
 
 ## Testing
 
-All 275 tests run without installing the package:
+All 419 tests run without installing the package:
 
 ```bash
 cd agent_eval
@@ -67,6 +68,7 @@ PYTHONPATH=src pytest tests/pipeline/ -v
 PYTHONPATH=src pytest tests/cli/ -v
 PYTHONPATH=src pytest tests/reporting/ -v
 PYTHONPATH=src pytest tests/utils/ -v
+PYTHONPATH=src pytest tests/experimental/ -v
 ```
 
 ### What Each Test Module Covers
@@ -87,6 +89,7 @@ PYTHONPATH=src pytest tests/utils/ -v
 | `tests/cli/` | CLI argument parsing and output for evaluate, compare, serve |
 | `tests/reporting/` | HTML report generation, XSS escaping, batch report |
 | `tests/utils/` | Cosine similarity, embedding helper factory |
+| `tests/experimental/ppe/` | PPE metrics, synthetic dataset generation, benchmark runner, reporting |
 
 ## CLI Commands
 

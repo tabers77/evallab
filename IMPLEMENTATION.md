@@ -16,7 +16,7 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 | **3** | RL Bridge (GRPO Priority) | COMPLETE | 45 | 10 |
 | **4** | LangGraph Adapter + DSPy + HTML Reports | COMPLETE | 53 | 8 |
 
-**Total: 332 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
+**Total: 419 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
 
 ---
 
@@ -362,3 +362,69 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 
 ### Doc Sync
 - Updated test count in Progress Summary: 275 → 332
+
+---
+
+## Experimental: PPE Reward Model Benchmarking
+
+### Status: COMPLETE (87 additional tests, 419 total passing)
+
+Based on arXiv:2410.14872 "How to Evaluate Reward Models for RLHF" — adapted to benchmark evallab's own RewardFunction implementations on synthetic preference data derived from ScoreVectors.
+
+### Files Created
+
+#### Package Structure (`src/agent_eval/experimental/ppe/`)
+| File | Status | Description |
+|------|--------|-------------|
+| `__init__.py` | Done | Public API re-exports (20 symbols) |
+| `models.py` | Done | `PreferencePair`, `BenchmarkSample`, `BenchmarkDataset`, `MetricResult`, `BenchmarkResult` dataclasses with validation and serialization |
+| `metrics.py` | Done | 6 PPE metrics (pairwise_accuracy, best_of_k, spearman_correlation, kendall_tau, separability, brier_score) + 5 internal math helpers (_sigmoid, _rank, _pearson, _spearman_rho, _kendall_tau_b). Zero dependencies — all stdlib. |
+| `runner.py` | Done | `BenchmarkRunner` — orchestrates metric evaluation, auto-selects applicable metrics based on dataset contents, configurable separability margin |
+| `synthetic.py` | Done | `SyntheticDatasetBuilder` (seeded RNG, configurable ground truth, O(n^2) pair generation with quality gap filtering, random K-group sampling) + `perturb_score_vector` (Gaussian noise, clamped to valid range) |
+| `report.py` | Done | `benchmark_to_text`, `comparison_to_text`, `benchmark_to_dict`, `comparison_to_dict` |
+
+#### Tests (`tests/experimental/ppe/`)
+| File | Status | Covers |
+|------|--------|--------|
+| `test_models.py` | Done | 14 tests — all dataclasses, validation, serialization, domain handling |
+| `test_metrics.py` | Done | 32 tests — all math helpers (sigmoid, rank, spearman, kendall), all 6 metrics with perfect/inverted/tied/empty cases, per-domain breakdown |
+| `test_runner.py` | Done | 7 tests — full/selective/pairs-only/samples-only metrics, comparison, auto-labeling, margin propagation |
+| `test_synthetic.py` | Done | 15 tests — perturbation (clamping, determinism, issues), pairs (gap filter, ordering), samples (grouping, custom N), dataset builder, custom ground truth, seed reproducibility |
+| `test_report.py` | Done | 8 tests — text/dict for single and comparison, rounding, empty handling, per-domain display |
+
+### Key Design Decisions
+- **Stdlib only** — all metrics implemented from scratch (Spearman, Kendall tau-b with tie corrections, numerically stable sigmoid)
+- **Callable-based metrics** — accept `Callable[[ScoreVector], float]`, decoupled from RewardFunction protocol
+- **Runner binds via `.compute`** — bridges protocol-based reward functions to the callable interface
+- **Synthetic builder uses instance-level `random.Random`** — fully deterministic with seed, no global state mutation
+
+---
+
+## Session: 2026-02-12 — dev (PPE Benchmarking)
+
+### Completed This Session
+- Implemented full PPE (Preference Proxy Evaluations) experimental module (arXiv:2410.14872 adaptation)
+- Created `src/agent_eval/experimental/` package with `ppe/` subpackage (7 source files)
+- Created `tests/experimental/ppe/` with 5 test files (87 tests, all passing)
+- 6 PPE metrics: pairwise_accuracy, best_of_k, spearman_correlation, kendall_tau, separability, brier_score
+- Synthetic dataset generation from ScoreVectors with configurable ground truth
+- BenchmarkRunner for single and comparison evaluation
+- Text and dict report formatting
+- Marked TODO items as done: "add reference to paper in experimental"
+
+### In Progress (uncommitted)
+- None — all changes committed
+
+### Remaining Steps
+- [ ] Create additional example scripts in `examples/` (e.g., LangGraph eval, LLM Judge, RL tuning)
+- [ ] Add JSONL format support to `AutoGenAdapter`
+- [ ] Document `attach_logger` usage in README or separate guide
+- [ ] Add PPE benchmark example script to `examples/`
+
+### Plan Accuracy Notes
+- PPE module is new work beyond the original 4-phase plan — added as experimental section
+- All prior phases remain complete and accurate
+
+### Doc Sync
+- Updated CLAUDE.md: test count 275 → 408, added experimental/ppe to Key Modules
+- Updated IMPLEMENTATION.md: test count 332 → 408, added PPE phase section
