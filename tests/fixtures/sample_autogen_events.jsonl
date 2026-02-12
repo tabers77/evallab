@@ -1,0 +1,11 @@
+{"type": "Message", "sender": "FinanceExpert_abc123", "content": "Analyzing revenue data", "timestamp": "2026-01-15T14:00:00"}
+{"type": "MessageEvent", "sender": "CustomerResearcher_def456", "receiver": "Orchestrator", "payload": "Customer profile retrieved", "kind": "text", "delivery_stage": "deliver", "timestamp": "2026-01-15T14:00:10"}
+{"type": "MessageDroppedEvent", "sender": "DataVisualiser_ghi789", "receiver": "FinanceExpert_abc123", "reason": "Queue full", "payload": "Chart data pending", "timestamp": "2026-01-15T14:00:20"}
+{"type": "MessageHandlerExceptionEvent", "handler_class": "AnalysisHandler", "exception": "ValueError: invalid data format", "traceback": "Traceback (most recent call last):\n  File ...", "timestamp": "2026-01-15T14:00:30"}
+{"type": "ToolCall", "tool": "get_product_finances", "arguments": {"customer": "Tetra Pak", "year": 2025}, "result": {"REVENUE": 283399382.94}, "timestamp": "2026-01-15T14:00:40"}
+{"type": "ToolCallEvent", "tool_name": "ask_web", "arguments": {"query": "market trends 2025"}, "result": "Market data found", "agent_id": "CustomerResearcher_def456", "timestamp": "2026-01-15T14:00:50"}
+{"type": "LLMCall", "model": "gpt-4o", "prompt_tokens": 1500, "completion_tokens": 350, "timestamp": "2026-01-15T14:01:00"}
+{"type": "LLMStreamStartEvent", "model": "gpt-4o", "agent_id": "FinanceExpert_abc123", "timestamp": "2026-01-15T14:01:10"}
+{"type": "LLMStreamEndEvent", "model": "gpt-4o", "agent_id": "FinanceExpert_abc123", "prompt_tokens": 2000, "completion_tokens": 500, "timestamp": "2026-01-15T14:01:20"}
+{"type": "FactCheckResult", "agent_name": "FinanceExpert", "verdict": "PASS", "reasoning": ["Revenue figure verified", "Source matches DB"], "question": "What is the revenue?", "answer_preview": "Revenue is 283M", "timestamp": "2026-01-15T14:01:30"}
+{"type": "AgentConstructionExceptionEvent", "agent_class": "SpecialistAgent", "exception": "ImportError: missing module 'analytics'", "timestamp": "2026-01-15T14:01:40"}

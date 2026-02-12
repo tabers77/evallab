@@ -11,6 +11,8 @@ from agent_eval.core.models import Episode, Step, StepKind
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_LOG = FIXTURES_DIR / "sample_log" / "event.txt"
+SAMPLE_JSONL = FIXTURES_DIR / "sample_autogen_events.jsonl"
+SAMPLE_JSON_ARRAY = FIXTURES_DIR / "sample_autogen_events.json"
 
 
 @pytest.fixture
@@ -21,6 +23,16 @@ def sample_log_path() -> Path:
 @pytest.fixture
 def sample_log_content() -> str:
     return SAMPLE_LOG.read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def sample_jsonl_path() -> Path:
+    return SAMPLE_JSONL
+
+
+@pytest.fixture
+def sample_json_array_path() -> Path:
+    return SAMPLE_JSON_ARRAY
 
 
 @pytest.fixture

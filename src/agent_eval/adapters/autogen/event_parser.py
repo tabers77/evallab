@@ -1,12 +1,125 @@
 """JSON event extraction from AutoGen log files.
 
-Ported from log_evaluator.py:_extract_json_events — uses a line-by-line
-parser with brace-counting state machine to handle multi-line JSON.
+Supports three input formats:
+
+- **text** — AutoGen event.txt with interleaved log lines and multi-line
+  JSON blocks (brace-counting state machine).
+- **jsonl** — One JSON object per line (structured event logger output).
+- **json_array** — A single JSON array of event objects.
+
+Use :func:`parse_events` as the unified entry point; it auto-detects the
+format and dispatches to the appropriate parser.
 """
 
 from __future__ import annotations
 
 import json
+
+
+# ------------------------------------------------------------------
+# Format detection
+# ------------------------------------------------------------------
+
+
+def detect_format(content: str) -> str:
+    """Detect the format of AutoGen log content.
+
+    Returns ``"json_array"``, ``"jsonl"``, or ``"text"``.
+
+    Detection logic:
+    - Starts with ``[`` (after stripping) → ``json_array``
+    - First non-empty line is a complete JSON object → ``jsonl``
+    - Otherwise → ``text`` (existing brace-counting parser)
+    """
+    stripped = content.lstrip()
+    if stripped.startswith("["):
+        return "json_array"
+
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                json.loads(line)
+                return "jsonl"
+            except (json.JSONDecodeError, ValueError):
+                pass
+        break  # only inspect the first non-empty line
+
+    return "text"
+
+
+# ------------------------------------------------------------------
+# JSONL parser
+# ------------------------------------------------------------------
+
+
+def extract_json_events_jsonl(content: str) -> list[dict]:
+    """Extract JSON events from one-JSON-per-line (JSONL) content.
+
+    Each non-empty line is parsed independently. Only dicts with a
+    ``"type"`` key are returned; malformed lines are silently skipped.
+    """
+    events: list[dict] = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and "type" in obj:
+                events.append(obj)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return events
+
+
+# ------------------------------------------------------------------
+# JSON Array parser
+# ------------------------------------------------------------------
+
+
+def extract_json_events_json_array(content: str) -> list[dict]:
+    """Extract JSON events from a JSON array (``[{...}, ...]``).
+
+    Only dicts with a ``"type"`` key are returned.
+    """
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    if not isinstance(data, list):
+        return []
+
+    return [obj for obj in data if isinstance(obj, dict) and "type" in obj]
+
+
+# ------------------------------------------------------------------
+# Unified entry point
+# ------------------------------------------------------------------
+
+
+def parse_events(content: str) -> list[dict]:
+    """Auto-detect format and extract JSON events.
+
+    Delegates to :func:`extract_json_events` (text),
+    :func:`extract_json_events_jsonl`, or
+    :func:`extract_json_events_json_array` based on
+    :func:`detect_format`.
+    """
+    fmt = detect_format(content)
+    if fmt == "json_array":
+        return extract_json_events_json_array(content)
+    if fmt == "jsonl":
+        return extract_json_events_jsonl(content)
+    return extract_json_events(content)
+
+
+# ------------------------------------------------------------------
+# Text parser (original brace-counting state machine)
+# ------------------------------------------------------------------
 
 
 def extract_json_events(content: str) -> list[dict]:

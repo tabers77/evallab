@@ -1,4 +1,4 @@
-"""AutoGen adapter: converts event.txt logs into canonical Episodes.
+"""AutoGen adapter: converts event.txt / JSONL / JSON logs into canonical Episodes.
 
 Ported and generalized from log_evaluator.py:_extract_metrics.
 """
@@ -11,14 +11,25 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agent_eval.adapters.autogen.event_parser import extract_json_events
+from agent_eval.adapters.autogen.event_parser import parse_events
 from agent_eval.adapters.autogen.tool_failure import is_tool_call_failed
 from agent_eval.core.exceptions import AdapterError
 from agent_eval.core.models import Episode, Step, StepKind
 
+# File names recognised when resolving a directory to a log file.
+_LOG_FILE_NAMES = ("event.txt", "events.jsonl", "events.json")
+
+# Glob patterns used by load_episodes to discover log files.
+_LOG_GLOB_PATTERNS = ("event.txt", "events.jsonl", "events.json")
+
 
 class AutoGenAdapter:
-    """Convert AutoGen event.txt logs into canonical Episodes.
+    """Convert AutoGen event logs into canonical Episodes.
+
+    Supports three log formats (auto-detected):
+    - ``event.txt`` — text + multi-line JSON (original AutoGen format)
+    - ``events.jsonl`` — one JSON object per line (structured event logger)
+    - ``events.json`` — JSON array of event objects
 
     Parameters
     ----------
@@ -29,6 +40,21 @@ class AutoGenAdapter:
     orchestrator_name
         The orchestrator agent name to exclude from per-agent turn counts.
     """
+
+    # ----- dispatch table: event "type" → handler method name -----
+    _EVENT_HANDLERS: dict[str, str] = {
+        "Message": "_handle_message",
+        "MessageEvent": "_handle_message_event",
+        "MessageDroppedEvent": "_handle_message_dropped",
+        "MessageHandlerExceptionEvent": "_handle_message_handler_exception",
+        "ToolCall": "_handle_tool_call",
+        "ToolCallEvent": "_handle_tool_call_event",
+        "LLMCall": "_handle_llm_call",
+        "LLMStreamStartEvent": "_handle_llm_stream_start",
+        "LLMStreamEndEvent": "_handle_llm_stream_end",
+        "FactCheckResult": "_handle_fact_check",
+        "AgentConstructionExceptionEvent": "_handle_agent_construction_exception",
+    }
 
     def __init__(
         self,
@@ -43,16 +69,17 @@ class AutoGenAdapter:
         return "autogen"
 
     def load_episode(self, source: str, **kwargs: Any) -> Episode:
-        """Load a single Episode from an event.txt file or directory.
+        """Load a single Episode from a log file or directory.
 
         Parameters
         ----------
         source
-            Path to an ``event.txt`` file or a directory containing one.
+            Path to an event log file (``event.txt``, ``events.jsonl``,
+            ``events.json``) or a directory containing one.
         """
         log_file = self._resolve_log_path(source)
         content = log_file.read_text(encoding="utf-8", errors="ignore")
-        raw_events = extract_json_events(content)
+        raw_events = parse_events(content)
         return self._build_episode(
             raw_events=raw_events,
             content=content,
@@ -62,22 +89,37 @@ class AutoGenAdapter:
     def load_episodes(self, source: str, **kwargs: Any) -> list[Episode]:
         """Load Episodes from a directory tree.
 
-        Finds all ``event.txt`` files under *source* (recursively) and
-        converts each into an Episode.
+        Finds all recognised log files (``event.txt``, ``events.jsonl``,
+        ``events.json``) under *source* recursively and converts each into
+        an Episode.  Episodes with zero steps are skipped (avoids picking
+        up non-AutoGen JSON files).
         """
         base = Path(source)
         if not base.is_dir():
             return [self.load_episode(source)]
 
+        seen_dirs: set[Path] = set()
         episodes: list[Episode] = []
-        for event_file in sorted(base.rglob("event.txt")):
-            try:
-                content = event_file.read_text(encoding="utf-8", errors="ignore")
-                raw_events = extract_json_events(content)
-                ep = self._build_episode(raw_events, content, str(event_file))
-                episodes.append(ep)
-            except Exception:
-                continue
+
+        for pattern in _LOG_GLOB_PATTERNS:
+            for event_file in sorted(base.rglob(pattern)):
+                # Avoid processing the same directory twice if it contains
+                # multiple recognised file names.
+                if event_file.parent in seen_dirs:
+                    continue
+                seen_dirs.add(event_file.parent)
+                try:
+                    content = event_file.read_text(
+                        encoding="utf-8", errors="ignore"
+                    )
+                    raw_events = parse_events(content)
+                    ep = self._build_episode(
+                        raw_events, content, str(event_file)
+                    )
+                    if ep.steps:
+                        episodes.append(ep)
+                except Exception:
+                    continue
         return episodes
 
     # ------------------------------------------------------------------
@@ -89,10 +131,13 @@ class AutoGenAdapter:
         if p.is_file():
             return p
         if p.is_dir():
-            event_file = p / "event.txt"
-            if event_file.exists():
-                return event_file
-        raise AdapterError(f"Could not find event.txt at: {path}")
+            for name in _LOG_FILE_NAMES:
+                candidate = p / name
+                if candidate.exists():
+                    return candidate
+        raise AdapterError(
+            f"Could not find AutoGen log file at: {path}"
+        )
 
     def _build_episode(
         self,
@@ -124,75 +169,192 @@ class AutoGenAdapter:
 
         for event in raw_events:
             event_type = event.get("type", "")
-
-            if event_type == "Message":
-                sender = event.get("sender", "")
-                agent_name = self._resolve_agent_name(sender)
-                ts = self._parse_timestamp(event.get("timestamp"))
-                steps.append(
-                    Step(
-                        kind=StepKind.MESSAGE,
-                        agent_id=sender,
-                        agent_name=agent_name,
-                        content=event.get("content"),
-                        timestamp=ts,
-                        metadata={"raw_event": event},
-                    )
-                )
-
-            elif event_type == "ToolCall":
-                tool_name = event.get("tool") or event.get("tool_name", "unknown")
-                result = event.get("result", "")
-                succeeded = not is_tool_call_failed(result)
-                ts = self._parse_timestamp(event.get("timestamp"))
-                steps.append(
-                    Step(
-                        kind=StepKind.TOOL_CALL,
-                        agent_id="",
-                        agent_name="",
-                        tool_name=tool_name,
-                        tool_args=event.get("arguments"),
-                        tool_result=result,
-                        tool_succeeded=succeeded,
-                        timestamp=ts,
-                        metadata={"raw_event": event},
-                    )
-                )
-
-            elif event_type == "LLMCall":
-                ts = self._parse_timestamp(event.get("timestamp"))
-                steps.append(
-                    Step(
-                        kind=StepKind.LLM_CALL,
-                        agent_id="",
-                        agent_name="",
-                        model=event.get("model"),
-                        prompt_tokens=event.get("prompt_tokens"),
-                        completion_tokens=event.get("completion_tokens"),
-                        timestamp=ts,
-                        metadata={"raw_event": event},
-                    )
-                )
-
-            elif event_type == "FactCheckResult":
-                ts = self._parse_timestamp(event.get("timestamp"))
-                steps.append(
-                    Step(
-                        kind=StepKind.FACT_CHECK,
-                        agent_id=event.get("agent_name", ""),
-                        agent_name=event.get("agent_name", ""),
-                        content=event.get("answer_preview"),
-                        timestamp=ts,
-                        metadata={
-                            "verdict": event.get("verdict"),
-                            "reasoning": event.get("reasoning", []),
-                            "question": event.get("question"),
-                            "raw_event": event,
-                        },
-                    )
-                )
+            handler_name = self._EVENT_HANDLERS.get(event_type)
+            if handler_name is None:
+                continue
+            handler = getattr(self, handler_name)
+            step = handler(event)
+            if step is not None:
+                steps.append(step)
 
         return steps
+
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+
+    def _handle_message(self, event: dict) -> Step:
+        sender = event.get("sender", "")
+        agent_name = self._resolve_agent_name(sender)
+        return Step(
+            kind=StepKind.MESSAGE,
+            agent_id=sender,
+            agent_name=agent_name,
+            content=event.get("content"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={"raw_event": event},
+        )
+
+    def _handle_message_event(self, event: dict) -> Step:
+        sender = event.get("sender", "")
+        agent_name = self._resolve_agent_name(sender)
+        payload = event.get("payload", "")
+        content = payload if isinstance(payload, str) else str(payload)
+        meta: dict[str, Any] = {"raw_event": event}
+        for key in ("receiver", "kind", "delivery_stage"):
+            if key in event:
+                meta[key] = event[key]
+        return Step(
+            kind=StepKind.MESSAGE,
+            agent_id=sender,
+            agent_name=agent_name,
+            content=content,
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata=meta,
+        )
+
+    def _handle_message_dropped(self, event: dict) -> Step:
+        sender = event.get("sender", "")
+        meta: dict[str, Any] = {
+            "custom_type": "MessageDroppedEvent",
+            "raw_event": event,
+        }
+        for key in ("receiver", "reason", "payload"):
+            if key in event:
+                meta[key] = event[key]
+        return Step(
+            kind=StepKind.CUSTOM,
+            agent_id=sender,
+            agent_name=self._resolve_agent_name(sender),
+            content=event.get("reason"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata=meta,
+        )
+
+    def _handle_message_handler_exception(self, event: dict) -> Step:
+        meta: dict[str, Any] = {
+            "custom_type": "MessageHandlerExceptionEvent",
+            "raw_event": event,
+        }
+        for key in ("handler_class", "exception", "traceback"):
+            if key in event:
+                meta[key] = event[key]
+        return Step(
+            kind=StepKind.CUSTOM,
+            agent_id=event.get("handler_class", ""),
+            agent_name="",
+            content=event.get("exception"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata=meta,
+        )
+
+    def _handle_tool_call(self, event: dict) -> Step:
+        tool_name = event.get("tool") or event.get("tool_name", "unknown")
+        result = event.get("result", "")
+        succeeded = not is_tool_call_failed(result)
+        return Step(
+            kind=StepKind.TOOL_CALL,
+            agent_id="",
+            agent_name="",
+            tool_name=tool_name,
+            tool_args=event.get("arguments"),
+            tool_result=result,
+            tool_succeeded=succeeded,
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={"raw_event": event},
+        )
+
+    def _handle_tool_call_event(self, event: dict) -> Step:
+        tool_name = event.get("tool_name") or event.get("tool", "unknown")
+        result = event.get("result", "")
+        succeeded = not is_tool_call_failed(result)
+        agent_id = event.get("agent_id", "")
+        return Step(
+            kind=StepKind.TOOL_CALL,
+            agent_id=agent_id,
+            agent_name=self._resolve_agent_name(agent_id),
+            tool_name=tool_name,
+            tool_args=event.get("arguments"),
+            tool_result=result,
+            tool_succeeded=succeeded,
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={"raw_event": event},
+        )
+
+    def _handle_llm_call(self, event: dict) -> Step:
+        return Step(
+            kind=StepKind.LLM_CALL,
+            agent_id="",
+            agent_name="",
+            model=event.get("model"),
+            prompt_tokens=event.get("prompt_tokens"),
+            completion_tokens=event.get("completion_tokens"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={"raw_event": event},
+        )
+
+    def _handle_llm_stream_start(self, event: dict) -> Step:
+        agent_id = event.get("agent_id", "")
+        return Step(
+            kind=StepKind.LLM_CALL,
+            agent_id=agent_id,
+            agent_name=self._resolve_agent_name(agent_id),
+            model=event.get("model"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={
+                "stream_phase": "start",
+                "raw_event": event,
+            },
+        )
+
+    def _handle_llm_stream_end(self, event: dict) -> Step:
+        agent_id = event.get("agent_id", "")
+        return Step(
+            kind=StepKind.LLM_CALL,
+            agent_id=agent_id,
+            agent_name=self._resolve_agent_name(agent_id),
+            model=event.get("model"),
+            prompt_tokens=event.get("prompt_tokens"),
+            completion_tokens=event.get("completion_tokens"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={
+                "stream_phase": "end",
+                "raw_event": event,
+            },
+        )
+
+    def _handle_fact_check(self, event: dict) -> Step:
+        return Step(
+            kind=StepKind.FACT_CHECK,
+            agent_id=event.get("agent_name", ""),
+            agent_name=event.get("agent_name", ""),
+            content=event.get("answer_preview"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={
+                "verdict": event.get("verdict"),
+                "reasoning": event.get("reasoning", []),
+                "question": event.get("question"),
+                "raw_event": event,
+            },
+        )
+
+    def _handle_agent_construction_exception(self, event: dict) -> Step:
+        return Step(
+            kind=StepKind.CUSTOM,
+            agent_id=event.get("agent_class", ""),
+            agent_name="",
+            content=event.get("exception"),
+            timestamp=self._parse_timestamp(event.get("timestamp")),
+            metadata={
+                "custom_type": "AgentConstructionExceptionEvent",
+                "agent_class": event.get("agent_class"),
+                "raw_event": event,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Utility helpers
+    # ------------------------------------------------------------------
 
     def _resolve_agent_name(self, sender: str) -> str:
         """Match a sender string to a known agent name."""
