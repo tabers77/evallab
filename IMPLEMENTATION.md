@@ -16,7 +16,7 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 | **3** | RL Bridge (GRPO Priority) | COMPLETE | 45 | 10 |
 | **4** | LangGraph Adapter + DSPy + HTML Reports | COMPLETE | 53 | 8 |
 
-**Total: 275 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
+**Total: 332 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
 
 ---
 
@@ -306,3 +306,59 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 - **DSPy bridge works without dspy installed** — import guard pattern, tests pass in all environments
 - **HTML reports are self-contained** — no external CSS/JS, single-file output with inline styles
 - **XSS protection** — all user content HTML-escaped in reports
+
+---
+
+## Post-Phase Work: AutoGen Logger + Examples
+
+### Status: COMPLETE (332 total tests passing)
+
+### Files Created
+
+#### AutoGen Logger (`src/agent_eval/adapters/autogen/`)
+| File | Status | Description |
+|------|--------|-------------|
+| `logger.py` | Done | `attach_logger()` — captures AutoGen `EVENT_LOGGER_NAME` events to JSONL files loadable by `AutoGenAdapter`. `_normalize()` handles dicts, Pydantic v1/v2, JSON strings. `LoggerHandle` with `.detach()` for clean teardown. |
+
+#### Examples (`examples/`)
+| File | Status | Description |
+|------|--------|-------------|
+| `try_autogen_eval.py` | Done | End-to-end example: parse log → run pipeline with NumericConsistencyScorer + IssueDetectorScorer → format report |
+
+#### Updated Files
+| File | Change |
+|------|--------|
+| `adapters/autogen/__init__.py` | Added exports: `LoggerHandle`, `attach_logger` |
+| `.gitignore` | Added `TODO.md`, `temp` |
+
+#### Tests
+| File | Status | Covers |
+|------|--------|--------|
+| `tests/adapters/autogen/test_logger.py` | Done | 21 tests — `_normalize` (dict, pydantic v1/v2, JSON string, edge cases), `_JsonlEventHandler` (JSONL output, skip invalid, non-serializable fields, multi-line), `attach_logger` integration (file creation, detach, append mode, parent dirs, adapter compatibility, import guard) |
+
+---
+
+## Session: 2026-02-12 — dev
+
+### Completed This Session
+- Added `src/agent_eval/adapters/autogen/logger.py` — JSONL event logger with `attach_logger()` and `LoggerHandle`
+- Added `tests/adapters/autogen/test_logger.py` — 21 tests covering normalization, handler, and integration
+- Updated `src/agent_eval/adapters/autogen/__init__.py` — exported `LoggerHandle` and `attach_logger`
+- Moved `try_autogen_eval.py` → `examples/try_autogen_eval.py`
+- Updated `.gitignore` — added `TODO.md` and `temp`
+
+### In Progress (uncommitted)
+- None — all changes committed (ab30945)
+
+### Remaining Steps
+- [ ] Create additional example scripts in `examples/` (e.g., LangGraph eval, LLM Judge, RL tuning)
+- [ ] Add JSONL format support to `AutoGenAdapter` (currently only event.txt brace-counting format)
+- [ ] Document `attach_logger` usage in README or separate guide
+- [x] Remove tracked `__pycache__/` files from git (root `.gitignore` already covers the pattern)
+
+### Plan Accuracy Notes
+- All 4 original phases are complete and accurate
+- Logger is new work beyond the original plan scope — added as post-phase section
+
+### Doc Sync
+- Updated test count in Progress Summary: 275 → 332
