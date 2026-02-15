@@ -12,7 +12,7 @@ Converts traces from any multi-agent framework (AutoGen, LangGraph) into a canon
 
 ```bash
 # No installation needed — run from the repo
-cd agent_eval
+cd evallab
 PYTHONPATH=src agent-eval evaluate path/to/event.txt
 
 # Or use Python directly
@@ -49,10 +49,10 @@ agent_eval/
 
 ## Testing
 
-All 419 tests run without installing the package:
+All 432 tests run without installing the package:
 
 ```bash
-cd agent_eval
+cd evallab
 
 # Run all tests
 PYTHONPATH=src pytest tests/ -v

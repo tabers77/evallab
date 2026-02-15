@@ -40,10 +40,14 @@ def _check_fastapi() -> None:
 if _FASTAPI_AVAILABLE:
 
     class RewardRequest(BaseModel):
-        """Batch reward request."""
+        """Batch reward request.
 
-        prompts: list[str]
-        completions: list[str]
+        Accepts both plain strings and conversational message-dict
+        lists (TRL v0.12+ format).
+        """
+
+        prompts: list
+        completions: list
 
     class RewardResponse(BaseModel):
         """Batch reward response."""

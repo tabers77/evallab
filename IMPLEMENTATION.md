@@ -16,7 +16,7 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 | **3** | RL Bridge (GRPO Priority) | COMPLETE | 45 | 10 |
 | **4** | LangGraph Adapter + DSPy + HTML Reports | COMPLETE | 53 | 8 |
 
-**Total: 419 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
+**Total: 432 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
 
 ---
 
@@ -97,7 +97,7 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 | File | Status | Covers |
 |------|--------|--------|
 | `conftest.py` | Done | Shared fixtures: `sample_log_path`, `sample_log_content`, `minimal_episode`, `multi_agent_episode` |
-| `fixtures/sample_autogen_log.txt` | Done | Full sample AutoGen log with Messages, ToolCalls, LLMCalls, FactCheckResult, and ANSWER block |
+| `fixtures/sample_log/event.txt` | Done | Full sample AutoGen log with Messages, ToolCalls, LLMCalls, FactCheckResult, and ANSWER block |
 | `fixtures/sample_langgraph_trace.json` | Done | Placeholder LangGraph trace |
 | `core/test_models.py` | Done | StepKind, Step, Episode (properties, filtering) |
 | `core/test_score.py` | Done | Severity, Issue, ScoreDimension (normalized), ScoreVector (overall, to_dict) |
@@ -367,7 +367,7 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 
 ## Experimental: PPE Reward Model Benchmarking
 
-### Status: COMPLETE (87 additional tests, 419 total passing)
+### Status: COMPLETE (87 additional tests, 432 total passing)
 
 Based on arXiv:2410.14872 "How to Evaluate Reward Models for RLHF" — adapted to benchmark evallab's own RewardFunction implementations on synthetic preference data derived from ScoreVectors.
 
@@ -426,5 +426,5 @@ Based on arXiv:2410.14872 "How to Evaluate Reward Models for RLHF" — adapted t
 - All prior phases remain complete and accurate
 
 ### Doc Sync
-- Updated CLAUDE.md: test count 275 → 408, added experimental/ppe to Key Modules
-- Updated IMPLEMENTATION.md: test count 332 → 408, added PPE phase section
+- Updated CLAUDE.md: test count 275 → 432, added experimental/ppe to Key Modules
+- Updated IMPLEMENTATION.md: test count 332 → 432, added PPE phase section
