@@ -8,6 +8,35 @@ Adapters --> Episode/Step --> Scorers --> ScoreVector --> Rewards --> RL Trainin
 
 Converts traces from any multi-agent framework (AutoGen, LangGraph) into a canonical trajectory format, runs pluggable scorers, and produces multi-dimensional evaluation results. Scores can feed human-readable reports, RL reward functions, or prompt optimization loops.
 
+## Installation
+
+Install agent-eval as an editable package so you can use it from any other project on your machine:
+
+```bash
+pip install -e /path/to/evallab
+```
+
+With optional dependency groups:
+
+```bash
+pip install -e /path/to/evallab[all]     # all optional deps
+pip install -e /path/to/evallab[rl]      # RL deps (TRL, DSPy)
+pip install -e /path/to/evallab[dev]     # development deps (pytest, black, ruff)
+```
+
+An editable install (`-e`) creates a link from your Python environment to the source code instead of copying files into `site-packages`. This means:
+
+- **Live changes** — any edit you make in the evallab source is immediately available without reinstalling.
+- **Use from anywhere** — import `agent_eval` from any project that shares the same Python environment.
+- **CLI available globally** — the `agent-eval` command works from any directory.
+
+Once installed, use it in your code:
+
+```python
+from agent_eval.core.models import Episode, Step
+from agent_eval.pipeline.eval_pipeline import EvalPipeline
+```
+
 ## Quick Start
 
 ```bash
