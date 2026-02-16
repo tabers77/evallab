@@ -20,6 +20,13 @@ dev = [
     "black>=24.0",
     "ruff>=0.3",
 ]
+autogen = [
+    "autogen-agentchat>=0.4",
+    "autogen-ext>=0.4",
+]
+llm-judge = [
+    "openai>=1.0",
+]
 rl = [
     "trl>=0.12",
     "torch>=2.0",
@@ -32,7 +39,7 @@ ragas = [
     "ragas>=0.1",
 ]
 all = [
-    "agent-eval[dev,rl,deepeval,ragas]",
+    "agent-eval[dev,autogen,llm-judge,rl,deepeval,ragas]",
 ]
 
 [project.scripts]

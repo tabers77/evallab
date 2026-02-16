@@ -10,19 +10,40 @@ Converts traces from any multi-agent framework (AutoGen, LangGraph) into a canon
 
 ## Installation
 
-Install agent-eval as an editable package so you can use it from any other project on your machine:
+The core evaluation pipeline (adapters, scorers, rewards, reporting) has **zero dependencies**. Install only the extras you actually need:
 
 ```bash
+# Base install — all built-in scorers, adapters, rewards, and reporting work out of the box
 pip install -e /path/to/evallab
 ```
 
-With optional dependency groups:
+### What's included vs. what needs extras
+
+| Feature | Deps needed | Install command |
+|---------|-------------|-----------------|
+| AutoGen event.txt adapter | none | base install |
+| LangGraph adapter | none | base install |
+| Numeric consistency scorer | none | base install |
+| Rule-based issue detection scorer | none | base install |
+| Reward functions (Weighted, Deduction, Composite) | none | base install |
+| Text / JSON / HTML reporting | none | base install |
+| LLM-as-Judge scorer | `openai` | `pip install -e /path/to/evallab[llm-judge]` |
+| AutoGen framework imports (programmatic use) | `autogen-agentchat` | `pip install -e /path/to/evallab[autogen]` |
+| DeepEval scorer wrapper | `deepeval` | `pip install -e /path/to/evallab[deepeval]` |
+| Ragas scorer wrapper | `ragas` | `pip install -e /path/to/evallab[ragas]` |
+| RL training (TRL, GRPO) | `torch`, `trl` | `pip install -e /path/to/evallab[rl]` |
+| Dev tools (pytest, black, ruff) | — | `pip install -e /path/to/evallab[dev]` |
+| Everything | — | `pip install -e /path/to/evallab[all]` |
+
+> **Tip:** The AutoGen adapter parses `event.txt` files using a built-in JSON state machine — it does **not** import AutoGen at runtime. You only need the `[autogen]` extra if you want to programmatically interact with AutoGen objects.
+
+Combine groups with commas:
 
 ```bash
-pip install -e /path/to/evallab[all]     # all optional deps
-pip install -e /path/to/evallab[rl]      # RL deps (TRL, DSPy)
-pip install -e /path/to/evallab[dev]     # development deps (pytest, black, ruff)
+pip install -e /path/to/evallab[autogen,llm-judge]
 ```
+
+### Why editable install?
 
 An editable install (`-e`) creates a link from your Python environment to the source code instead of copying files into `site-packages`. This means:
 
