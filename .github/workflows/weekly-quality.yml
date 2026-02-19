@@ -1,0 +1,36 @@
+name: Weekly Quality Check
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Every Monday 9am UTC
+  workflow_dispatch:
+    inputs:
+      auto_merge_tier:
+        description: "1=issues only, 2=PRs only, 3=auto-merge"
+        type: choice
+        options: ["1", "2", "3"]
+        default: "2"
+      analysis_mode:
+        description: "Analysis mode"
+        type: choice
+        options: ["upgrade", "strategic", "both"]
+        default: "both"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  quality:
+    uses: tabers77/claude_experiments/.github/workflows/weekly-quality-check.yml@master
+    with:
+      auto_merge_tier: ${{ github.event.inputs.auto_merge_tier || '1' }}
+      test_command: "pytest tests/ -x"
+      target_branch: "master"
+      model: "gpt-5.2"
+      analysis_mode: ${{ github.event.inputs.analysis_mode || 'both' }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      KEY_VAULT_ENDPOINT: ${{ secrets.KEY_VAULT_ENDPOINT }}
