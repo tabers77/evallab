@@ -25,7 +25,7 @@ jobs:
   quality:
     uses: tabers77/claude_experiments/.github/workflows/weekly-quality-check.yml@master
     with:
-      auto_merge_tier: ${{ github.event.inputs.auto_merge_tier || '1' }}
+      auto_merge_tier: ${{ github.event.inputs.auto_merge_tier || '2' }}
       test_command: "pytest tests/ -x"
       target_branch: "master"
       model: "gpt-5.2"
