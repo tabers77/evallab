@@ -15,10 +15,10 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "black>=24.0",
-    "ruff>=0.3",
+    "pytest>=>=8.0 (keep; ensure latest 8.x)",
+    "pytest-asyncio>=>=0.23 (keep; ensure latest 0.23.x/0.24.x if compatible)",
+    "black>=>=24.0 (keep; ensure latest 24.x)",
+    "ruff>=>=0.3 (keep; ensure latest 0.x)",
 ]
 autogen = [
     "autogen-agentchat>=0.4",
