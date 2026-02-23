@@ -6,7 +6,7 @@ Framework-agnostic LLM/Agent evaluator with RL support.
 Adapters --> Episode/Step --> Scorers --> ScoreVector --> Rewards --> RL Training
 ```
 
-Converts traces from any multi-agent framework (AutoGen, LangGraph) into a canonical trajectory format, runs pluggable scorers, and produces multi-dimensional evaluation results. Scores can feed human-readable reports, RL reward functions, or prompt optimization loops.
+Converts traces from any multi-agent framework (AutoGen, LangGraph, OpenTelemetry) into a canonical trajectory format, runs pluggable scorers, and produces multi-dimensional evaluation results. Scores can feed human-readable reports, RL reward functions, or prompt optimization loops.
 
 ## Installation
 
@@ -23,6 +23,7 @@ pip install -e /path/to/evallab
 |---------|-------------|-----------------|
 | AutoGen event.txt adapter | none | base install |
 | LangGraph adapter | none | base install |
+| OpenTelemetry GenAI adapter | none | base install |
 | Numeric consistency scorer | none | base install |
 | Rule-based issue detection scorer | none | base install |
 | Reward functions (Weighted, Deduction, Composite) | none | base install |
@@ -75,7 +76,7 @@ PYTHONPATH=src python -m agent_eval.cli.main evaluate path/to/event.txt
 agent_eval/
   src/agent_eval/
     core/           # Episode, Step, ScoreVector, Protocol classes
-    adapters/       # AutoGen, LangGraph trace -> Episode converters
+    adapters/       # AutoGen, LangGraph, OpenTelemetry trace -> Episode converters
     scorers/        # Numeric, Rules, LLM Judge, DeepEval, Ragas
     rewards/        # WeightedSum, Deduction, Composite reward functions
     rl/             # TuningLoop, TRL bridge, DSPy bridge, reward server
@@ -99,7 +100,7 @@ agent_eval/
 
 ## Testing
 
-All 432 tests run without installing the package:
+All 495 tests run without installing the package:
 
 ```bash
 cd evallab
@@ -111,6 +112,7 @@ PYTHONPATH=src pytest tests/ -v
 PYTHONPATH=src pytest tests/core/ -v
 PYTHONPATH=src pytest tests/adapters/autogen/ -v
 PYTHONPATH=src pytest tests/adapters/langgraph/ -v
+PYTHONPATH=src pytest tests/adapters/otel/ -v
 PYTHONPATH=src pytest tests/scorers/ -v
 PYTHONPATH=src pytest tests/rewards/ -v
 PYTHONPATH=src pytest tests/rl/ -v
@@ -128,6 +130,7 @@ PYTHONPATH=src pytest tests/experimental/ -v
 | `tests/core/` | Episode, Step, StepKind dataclasses; ScoreVector, ScoreDimension, Issue, Severity |
 | `tests/adapters/autogen/` | JSON event extraction (brace-counting parser), tool failure detection, AutoGen log -> Episode conversion |
 | `tests/adapters/langgraph/` | LangGraph `astream_events` JSON -> Episode, checkpoint reader, tool/LLM call detection |
+| `tests/adapters/otel/` | OTLP JSON -> Episode, span→step mapping, attribute unwrapping, legacy attribute fallback, edge cases |
 | `tests/scorers/numeric/` | Number extraction from text and tool results, numeric fabrication detection |
 | `tests/scorers/rules/` | Deduction-based scoring (100pt base), 6-category issue detection |
 | `tests/scorers/llm_judge/` | LLM-as-Judge with mock functions, batch/individual modes, JSON fallback |
@@ -342,7 +345,59 @@ episode = latest_checkpoint_to_episode(checkpoints)
 # Now evaluate the episode through any pipeline
 ```
 
-### 4. Adding LLM-as-Judge Scoring
+### 4. Evaluating OpenTelemetry Traces
+
+The OTel adapter reads OTLP JSON trace exports with [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). This covers any framework instrumented via [OpenLLMetry](https://github.com/traceloop/openllmetry), [Langfuse](https://langfuse.com/), [Arize Phoenix](https://github.com/Arize-ai/phoenix), or any OTel-compatible exporter.
+
+```python
+from agent_eval.adapters.otel import OTelTraceAdapter
+from agent_eval.scorers.rules import IssueDetectorScorer
+from agent_eval.pipeline.runner import EvalPipeline
+
+adapter = OTelTraceAdapter(default_agent_name="agent")
+
+# IssueDetectorScorer covers general quality checks.
+# Add NumericConsistencyScorer if your agent reports numerical data.
+pipeline = EvalPipeline(adapter=adapter, scorers=[IssueDetectorScorer()])
+
+# From an OTLP JSON export file
+result = pipeline.evaluate_from_source("traces/otel_export.json")
+
+# From a dict (e.g. captured at runtime)
+episode = adapter.load_from_dict(otlp_trace_dict)
+result = pipeline.evaluate(episode)
+
+# Batch: all .json/.jsonl files under a directory
+results = pipeline.evaluate_batch("traces/")
+```
+
+**Supported input formats:**
+- **OTLP JSON** — `{"resourceSpans": [...]}` (standard OTel export)
+- **OTLP JSONL** — one `{"resourceSpans": [...]}` per line (file exporter)
+- **Flat spans** — `{"spans": [...]}` (simplified format for testing)
+
+**Span mapping** (`gen_ai.operation.name` → StepKind):
+
+| Operation | StepKind | Notes |
+|-----------|----------|-------|
+| `chat`, `text_completion`, `generate_content` | `LLM_CALL` | Extracts model, token counts |
+| `execute_tool` | `TOOL_CALL` | Extracts tool name, args, result |
+| `invoke_agent`, `create_agent` | `MESSAGE` | Agent lifecycle spans |
+| `embeddings`, `retrieval` | `CUSTOM` | Non-conversational operations |
+
+**Saving OTel traces for evaluation:**
+
+```bash
+# Using the OTel file exporter (produces OTLP JSON)
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_TRACES_EXPORTER=otlp
+
+# Or export from Langfuse / Phoenix UI as OTLP JSON
+```
+
+> **Tip:** The OTel adapter also handles legacy OpenLLMetry attributes (`llm.*`, `traceloop.*`) as fallbacks, so traces from older instrumentation versions work too.
+
+### 5. Adding LLM-as-Judge Scoring
 
 The LLM Judge scorer works with any LLM — you provide a callable:
 
@@ -400,7 +455,7 @@ pipeline = EvalPipeline(
 )
 ```
 
-### 5. Custom Scorers
+### 6. Custom Scorers
 
 Implement the `Scorer` protocol — no imports needed:
 
@@ -443,7 +498,7 @@ default_registry.register("response_length", ResponseLengthScorer)
 # Now usable via CLI: --scorers response_length
 ```
 
-### 6. Writing a Custom Adapter (New Framework)
+### 7. Writing a Custom Adapter (New Framework)
 
 Implement the `TraceAdapter` protocol:
 
@@ -479,7 +534,7 @@ class CrewAIAdapter:
         ...
 ```
 
-### 7. RL Integration with TRL (GRPO)
+### 8. RL Integration with TRL (GRPO)
 
 Use evaluation scores as reward signals for TRL's GRPOTrainer:
 
@@ -505,7 +560,7 @@ trainer = GRPOTrainer(
 )
 ```
 
-### 8. Prompt Optimization Loop
+### 9. Prompt Optimization Loop
 
 Run iterative prompt tuning with pluggable callbacks:
 
@@ -545,7 +600,7 @@ print(f"Best reward: {result.best_reward:.3f}")
 print(f"Converged: {result.converged}")
 ```
 
-### 9. DSPy MIPROv2 Integration
+### 10. DSPy MIPROv2 Integration
 
 Use agent_eval scores as the optimization metric for DSPy:
 
@@ -568,7 +623,7 @@ teleprompter = dspy.MIPROv2(metric=metric.as_dspy_metric())
 optimized_program = teleprompter.compile(program, trainset=examples)
 ```
 
-### 10. HTML Reports
+### 11. HTML Reports
 
 Generate self-contained HTML reports:
 
@@ -586,7 +641,7 @@ with open("batch_report.html", "w") as f:
     f.write(html)
 ```
 
-### 11. Composite Rewards for Multi-Objective RL
+### 12. Composite Rewards for Multi-Objective RL
 
 Combine multiple reward signals with custom weights:
 
@@ -1015,6 +1070,8 @@ pip install -e ".[all]"
 
 ## Next Steps and Research Directions
 
+> **Full roadmap with priorities and status tracking**: See [`IMPLEMENTATION.md`](IMPLEMENTATION.md) Phase 5.
+
 The following areas are open for exploration and would strengthen the evaluator's capabilities. Each includes pointers to relevant papers and tools for reference.
 
 ### 1. Multi-Agent Credit Assignment
@@ -1067,16 +1124,9 @@ The following areas are open for exploration and would strengthen the evaluator'
 
 **Implementation path**: The `RagasScorer` wrapper exists but needs real integration testing. Extend the `Episode` model to capture retrieval context (retrieved documents, embeddings) as step metadata. Build a `RetrievalQualityScorer` that measures precision/recall of retrieved chunks.
 
-### 6. Observability Integration
+### 6. Observability Integration — DONE
 
-**Problem**: Production agent systems need continuous monitoring, not just offline evaluation.
-
-**Research / Tools**:
-- [Langfuse](https://langfuse.com/) — Open-source LLM observability platform with OpenTelemetry-compatible tracing.
-- [TruLens](https://www.trulens.org/) — Evaluation and tracking for LLM applications.
-- [OpenTelemetry Semantic Conventions for GenAI](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — Standardized attributes for LLM traces.
-
-**Implementation path**: Add an `OpenTelemetryAdapter` that reads OTLP traces with GenAI semantic conventions. This would allow evaluating any LLM application instrumented with OpenTelemetry, regardless of framework.
+The `OTelTraceAdapter` reads OTLP JSON trace exports with [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), covering any framework instrumented via OpenLLMetry, Langfuse, Arize Phoenix, or any OTel-compatible exporter. See section 4 above for usage.
 
 ### 7. Safety and Alignment Evaluation
 

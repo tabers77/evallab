@@ -1,0 +1,201 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "multi-agent-app" }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "opentelemetry.instrumentation.openai",
+            "version": "1.0.0"
+          },
+          "spans": [
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-root-1",
+              "parentSpanId": "",
+              "name": "research_agent invocation",
+              "startTimeUnixNano": "1700000000000000000",
+              "endTimeUnixNano": "1700000010000000000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "invoke_agent" }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": { "stringValue": "research_agent" }
+                }
+              ]
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-llm-1",
+              "parentSpanId": "span-root-1",
+              "name": "chat gpt-4o",
+              "startTimeUnixNano": "1700000001000000000",
+              "endTimeUnixNano": "1700000003000000000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "chat" }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": { "stringValue": "gpt-4o" }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": { "intValue": "150" }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": { "intValue": "85" }
+                },
+                {
+                  "key": "gen_ai.system",
+                  "value": { "stringValue": "openai" }
+                },
+                {
+                  "key": "gen_ai.content.completion",
+                  "value": { "stringValue": "I'll search for the latest data on renewable energy trends." }
+                }
+              ]
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-tool-1",
+              "parentSpanId": "span-root-1",
+              "name": "execute_tool web_search",
+              "startTimeUnixNano": "1700000003000000000",
+              "endTimeUnixNano": "1700000005000000000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "execute_tool" }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": { "stringValue": "web_search" }
+                },
+                {
+                  "key": "gen_ai.tool.call.arguments",
+                  "value": { "stringValue": "{\"query\": \"renewable energy trends 2025\"}" }
+                },
+                {
+                  "key": "gen_ai.tool.call.result",
+                  "value": { "stringValue": "Solar capacity grew 30% year-over-year..." }
+                }
+              ]
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-llm-2",
+              "parentSpanId": "span-root-1",
+              "name": "chat gpt-4o",
+              "startTimeUnixNano": "1700000005000000000",
+              "endTimeUnixNano": "1700000007000000000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "chat" }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": { "stringValue": "gpt-4o" }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": { "intValue": "320" }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": { "intValue": "200" }
+                },
+                {
+                  "key": "gen_ai.content.completion",
+                  "value": { "stringValue": "Based on my research, renewable energy saw 30% growth in solar capacity." }
+                }
+              ]
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-root-2",
+              "parentSpanId": "",
+              "name": "writer_agent invocation",
+              "startTimeUnixNano": "1700000008000000000",
+              "endTimeUnixNano": "1700000012000000000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "invoke_agent" }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": { "stringValue": "writer_agent" }
+                }
+              ]
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-llm-3",
+              "parentSpanId": "span-root-2",
+              "name": "chat gpt-4o",
+              "startTimeUnixNano": "1700000009000000000",
+              "endTimeUnixNano": "1700000011000000000",
+              "status": { "code": 1 },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "chat" }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": { "stringValue": "gpt-4o" }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": { "intValue": "400" }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": { "intValue": "350" }
+                }
+              ]
+            },
+            {
+              "traceId": "abc123def456",
+              "spanId": "span-tool-fail",
+              "parentSpanId": "span-root-2",
+              "name": "execute_tool save_document",
+              "startTimeUnixNano": "1700000011000000000",
+              "endTimeUnixNano": "1700000012000000000",
+              "status": { "code": 2, "message": "Permission denied" },
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": { "stringValue": "execute_tool" }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": { "stringValue": "save_document" }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

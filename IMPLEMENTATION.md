@@ -16,7 +16,7 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 | **3** | RL Bridge (GRPO Priority) | COMPLETE | 45 | 10 |
 | **4** | LangGraph Adapter + DSPy + HTML Reports | COMPLETE | 53 | 8 |
 
-**Total: 432 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
+**Total: 495 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
 
 ---
 
@@ -417,7 +417,7 @@ Based on arXiv:2410.14872 "How to Evaluate Reward Models for RLHF" — adapted t
 
 ### Remaining Steps
 - [ ] Create additional example scripts in `examples/` (e.g., LangGraph eval, LLM Judge, RL tuning)
-- [ ] Add JSONL format support to `AutoGenAdapter`
+- [x] ~~Add JSONL format support to `AutoGenAdapter`~~ — already done (`adapter.py` supports JSONL via `detect_format`)
 - [ ] Document `attach_logger` usage in README or separate guide
 - [ ] Add PPE benchmark example script to `examples/`
 
@@ -428,3 +428,122 @@ Based on arXiv:2410.14872 "How to Evaluate Reward Models for RLHF" — adapted t
 ### Doc Sync
 - Updated CLAUDE.md: test count 275 → 432, added experimental/ppe to Key Modules
 - Updated IMPLEMENTATION.md: test count 332 → 432, added PPE phase section
+
+---
+
+## Phase 5: Strategic Roadmap
+
+Based on domain research (18 libraries, 30+ papers, 15 adjacent projects, 8 community sources, 12 RL systems, 6 observability platforms evaluated).
+
+### Execution Order
+
+Items sorted by priority then effort. **Do the next unchecked item.**
+
+| # | Item | Theme | Effort | Status | Why this order |
+|---|------|-------|--------|--------|----------------|
+| 1 | OTel GenAI Trace Adapter | Ingestion | Medium | **DONE** | Highest leverage — one adapter covers dozens of OTel-instrumented frameworks |
+| 2 | OpenAI Agents SDK Adapter | Ingestion | Medium | Not Started | Largest single-framework user base (OpenAI ecosystem) |
+| 3 | CrewAI Adapter | Ingestion | Medium | Not Started | Highest-starred OSS agent framework (~34k stars) |
+| 4 | LlamaGuard Safety Scorer | Evaluation | Medium | Not Started | Critical for safe RL training — blocks responsible RL use |
+| 5 | Per-Agent Credit Assignment | Evaluation | Large | Not Started | #1 stated gap; prerequisite for meaningful multi-agent RL |
+| 6 | Process Reward Scorer | Evaluation | Large | Not Started | Unlocks step-level RL; build before RL bridges (synergy) |
+| 7 | Google ADK Adapter | Ingestion | Medium | Not Started | Fast-growing Google ecosystem (~15.6k stars) |
+| 8 | Tool Strategy Scorer | Evaluation | Medium | Not Started | Higher-signal tool eval than current failure-rate checks |
+| 9 | veRL Integration Bridge | RL | Medium | Not Started | Production-scale RL (ByteDance/NVIDIA) |
+| 10 | OpenRLHF Integration Bridge | RL | Medium | Not Started | Distributed RL; pairs with process rewards |
+| 11 | Population-Based Prompt Evolution | RL | Large | Not Started | Extends TuningLoop; avoids local optima |
+| 12 | Synthetic Test Case Generator | Self-Sufficiency | Medium | Not Started | Prevents overfitting to static test sets |
+
+### Theme Details
+
+Below is reference detail for each item, grouped by theme.
+
+#### 5A: Universal Trace Ingestion
+
+_Make agent-eval the standard evaluation backend for any agent framework._
+
+| Item | Description | Sources |
+|------|-------------|---------|
+| ~~OTel GenAI Trace Adapter~~ | **DONE.** `OTelTraceAdapter` reads OTLP JSON exports, maps `gen_ai.*` spans to Steps. Covers Langfuse, Phoenix, OpenLLMetry. Zero deps. 63 tests. | [OTel GenAI Semconv](https://opentelemetry.io/docs/specs/semconv/gen-ai/), [Agent Spans](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/) |
+| OpenAI Agents SDK Adapter | Parse OpenAI Agents SDK structured traces (agents, handoffs, tool calls). Largest single-framework user base. | [GitHub](https://github.com/openai/openai-agents-python) |
+| CrewAI Adapter | Parse CrewAI task execution logs. Highest-starred OSS agent framework (~34k stars). | [GitHub](https://github.com/crewAIInc/crewAI) |
+| Google ADK Adapter | Parse Google ADK traces. Fast-growing Google ecosystem (~15.6k stars). | [GitHub](https://github.com/google/adk-python) |
+
+#### 5B: Deeper Evaluation
+
+_Move beyond episode-level scoring to fine-grained, multi-dimensional evaluation._
+
+| Item | Description | Sources |
+|------|-------------|---------|
+| Per-Agent Credit Assignment | Decompose team-level ScoreVector into per-agent breakdowns. Heuristic + optional LLM-critic modes. Fills gap #1. | [Agent Lightning](https://github.com/microsoft/agent-lightning), [LLM-MCA](https://arxiv.org/abs/2502.16863) |
+| Process Reward Scorer | Per-step rewards (heuristic, LLM-judge, implicit PRM). Unlocks step-level RL. Fills gap #3. | [PRIME](https://arxiv.org/abs/2502.01456), [AgentPRM](https://arxiv.org/abs/2502.10325) |
+| Tool Strategy Scorer | Evaluate tool selection accuracy, argument correctness, redundant call detection. Fills gap #4. | [BFCL](https://gorilla.cs.berkeley.edu/leaderboard.html), [tau-bench](https://github.com/sierra-research/tau-bench) |
+| LlamaGuard Safety Scorer | LlamaGuard 3 wrapper for safety scoring. Critical for safe RL training. Fills gap #7. | [LlamaGuard 3](https://www.llama.com/docs/model-cards-and-prompt-formats/llama-guard-3/) |
+
+#### 5C: RL Training Ecosystem
+
+_Become the standard evaluation-to-reward bridge for all RL backends._
+
+| Item | Description | Sources |
+|------|-------------|---------|
+| veRL Integration Bridge | Wrap EvalPipeline as veRL reward callable. Production-scale RL (ByteDance/NVIDIA). | [GitHub](https://github.com/volcengine/verl) |
+| OpenRLHF Integration Bridge | Wrap EvalPipeline as OpenRLHF 0.8.0 external environment. | [GitHub](https://github.com/OpenRLHF/OpenRLHF) |
+| Population-Based Prompt Evolution | Extend TuningLoop with population-based crossover/mutation (GEPA-style). Fills gap #2. | [GEPA](https://arxiv.org/pdf/2507.19457), [EvoPrompt](https://arxiv.org/abs/2309.08532) |
+
+#### 5D: Self-Sufficiency
+
+_Make agent-eval capable of generating its own test cases._
+
+| Item | Description | Sources |
+|------|-------------|---------|
+| Synthetic Test Case Generator | LLM-driven test input generation. Co-evolves with TuningLoop. Fills gap #8. | [Ragas Synthetic Gen](https://docs.ragas.io/en/stable/getstarted/testset_generation/) |
+
+### Competitive Landscape
+
+| Tool | Stars | Evaluates Traces? | Produces RL Rewards? | Multi-Agent Credit? | Process Rewards? | Zero Core Deps? |
+|------|-------|-------------------|---------------------|---------------------|-----------------|----------------|
+| **agent-eval** | — | Yes | **Yes** | Planned | Planned | **Yes** |
+| DeepEval | 13.8k | Yes (v3.0) | No | No | No | No |
+| Ragas | 12.7k | Partial | No | No | No | No |
+| Langfuse | 19k | Yes (observability) | No | No | No | No |
+| TruLens | 3.1k | Yes | No | No | No | No |
+| Phoenix | 7.8k | Yes (observability) | No | No | No | No |
+| Inspect AI | 1.8k | Yes (safety) | No | No | No | No |
+| Agent Lightning | — | Yes (RL-focused) | **Yes** | **Yes** | Partial | No |
+
+**Unique positioning**: No existing tool combines trace-based agent evaluation with RL reward functions at zero core dependencies.
+
+### Watch
+
+| # | What | Why | Adopt When |
+|---|------|-----|------------|
+| 1 | Agent Lightning (MS Research) | Closest architectural cousin; credit assignment module | Stable release with documented API |
+| 2 | HiPER (Hierarchical Plan-Execute RL) | HAE credit assignment at planner/executor levels | Public implementation released |
+| 3 | MASPRM (Multi-Agent System PRM) | Multi-agent process reward model | Public implementation released |
+| 4 | AgentPRM | Monte Carlo agent PRM for tool-use traces | Matures beyond research prototype |
+| 5 | OpenPipe ART | Multi-turn agent GRPO trainer | Reaches beta stability |
+| 6 | RL-Factory | Minimal reward-interface RL wrapper | Community adoption stabilizes |
+| 7 | Inspect AI (UK AISI) | 100+ safety evaluations | Need for compliance-grade safety evals |
+| 8 | Amazon Bedrock AgentCore Evals | 13 built-in evaluators; validates market demand | Customers request trace import |
+
+### Skip
+
+| # | What | Why |
+|---|------|-----|
+| 1 | lm-evaluation-harness (EleutherAI) | Benchmark-focused, not agent/trace evaluation |
+| 2 | HELM (Stanford) | Foundation model benchmarking, not agent traces |
+| 3 | Evidently AI | ML monitoring/drift detection, not RL rewards |
+| 4 | Giskard v3 | Unstable API (v3 rewrite). Revisit when stable. |
+| 5 | Promptfoo | TypeScript-native; not integrable into Python pipeline |
+| 6 | LangSmith | Closed SaaS. LangGraph adapter covers open-source LangChain. |
+| 7 | Braintrust | Closed SaaS. No open integration surface. |
+| 8 | sdiehl/prm | Too narrow / prototype-quality. PRIME covers better. |
+| 9 | AgentBench (Tsinghua) | Less maintained than SWE-bench/BFCL/tau-bench |
+
+### Synergies
+
+- **OTel Adapter + All Framework Adapters**: OTel may eventually subsume per-framework adapters as frameworks adopt OTel instrumentation. Build OTel first; add framework-specific adapters only where OTel coverage is insufficient.
+- **Credit Assignment + Process Rewards**: Both decompose `ScoreVector` into sub-episode granularity. Share `step_scores` infrastructure.
+- **Safety Scorer + Composite Reward**: LlamaGuard scores become hard constraints in `CompositeReward` (zero reward if unsafe), preventing RL reward-hacking.
+- **Process Rewards + veRL/OpenRLHF**: Step-level rewards are the differentiating feature for scaled RL training systems. Build process rewards before RL bridges.
+- **Test Case Generator + Prompt Evolution**: Co-evolving test cases and prompts prevents overfitting. Multiplicative value.
