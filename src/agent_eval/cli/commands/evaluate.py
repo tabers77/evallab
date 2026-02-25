@@ -17,6 +17,8 @@ from agent_eval.reporting.text import format_report, format_comparison_report
 from agent_eval.reporting.json_report import to_json, to_json_batch
 from agent_eval.scorers.numeric.consistency import NumericConsistencyScorer
 from agent_eval.scorers.rules.issue_detector import IssueDetectorScorer
+from agent_eval.scorers.reasoning.intrinsic import IntrinsicReasoningScorer
+from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
 
 
 def add_evaluate_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -63,8 +65,8 @@ def add_evaluate_parser(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--scorers",
         nargs="*",
-        default=["numeric", "issues"],
-        help="Scorers to run (default: numeric issues)",
+        default=["numeric", "issues", "orchestration"],
+        help="Scorers to run (default: numeric issues orchestration)",
     )
 
 
@@ -92,6 +94,8 @@ def _build_scorers(args: argparse.Namespace) -> list:
     scorer_map = {
         "numeric": NumericConsistencyScorer,
         "issues": IssueDetectorScorer,
+        "intrinsic": IntrinsicReasoningScorer,
+        "orchestration": OrchestrationScorer,
     }
     scorers = []
     for name in args.scorers:

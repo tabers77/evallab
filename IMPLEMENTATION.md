@@ -16,7 +16,9 @@ Architecture: `Adapters → Episode/Step → Scorers → ScoreVector → Rewards
 | **3** | RL Bridge (GRPO Priority) | COMPLETE | 45 | 10 |
 | **4** | LangGraph Adapter + DSPy + HTML Reports | COMPLETE | 53 | 8 |
 
-**Total: 495 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
+| **5a** | Intrinsic Reasoning & Orchestration Scorers | COMPLETE | 42 | 4 |
+
+**Total: 526 tests passing** | Run with: `PYTHONPATH=src pytest tests/ -v`
 
 ---
 
@@ -431,6 +433,47 @@ Based on arXiv:2410.14872 "How to Evaluate Reward Models for RLHF" — adapted t
 
 ---
 
+## Phase 5a: Intrinsic Reasoning & Orchestration Effectiveness Scorers
+
+### Status: COMPLETE (42 additional tests, 526 total passing)
+
+Based on "Agentic Reasoning for Large Language Models" (Wei et al., 2026) — separates model capability (intrinsic reasoning) from workflow quality (orchestration), enabling the diagnosis "is my model bad or is my orchestration bad?"
+
+### Files Created
+
+#### Reasoning Scorer (`src/agent_eval/scorers/reasoning/`)
+| File | Status | Description |
+|------|--------|-------------|
+| `__init__.py` | Done | Package init |
+| `intrinsic.py` | Done | `IntrinsicReasoningScorer` — analyzes MESSAGE-level content for reasoning quality. 4 dimensions: `reasoning_depth` (reasoning marker ratio), `reasoning_coherence` (contradiction detection), `self_correction` (retraction/correction patterns), `plan_quality` (planning structure with actionability check). Issues: shallow reasoning WARNING, per-contradiction WARNING, no-planning-in-multistep INFO. |
+
+#### Orchestration Scorer (`src/agent_eval/scorers/orchestration/`)
+| File | Status | Description |
+|------|--------|-------------|
+| `__init__.py` | Done | Package init |
+| `effectiveness.py` | Done | `OrchestrationScorer` — analyzes Episode-level structure (step ordering, agent transitions, tool patterns). 5 dimensions: `delegation_efficiency` (productive agent ratio), `tool_strategy` (retry/redundancy/diversity penalties), `coordination_overhead` (productive step ratio), `recovery_effectiveness` (failure recovery rate), `termination_quality` (wasted steps after answer). Issues: idle agent WARNING, tool retry loop ERROR, high overhead WARNING, unrecovered failure WARNING. |
+
+#### Updated Files
+| File | Change |
+|------|--------|
+| `scorers/registry.py` | Registered `intrinsic_reasoning` and `orchestration` in `_register_builtins()` |
+| `cli/commands/evaluate.py` | Added `intrinsic` and `orchestration` to CLI scorer map |
+
+#### Tests
+| File | Status | Covers |
+|------|--------|--------|
+| `tests/scorers/reasoning/test_intrinsic.py` | Done | 19 tests — basics (name, protocol, dimensions, empty), reasoning depth (with/without/partial markers, shallow issue), coherence (no contradictions, with contradictions, single message, issue), self-correction (with/without, short ignored), plan quality (with/without, multistep issue, single step) |
+| `tests/scorers/orchestration/test_effectiveness.py` | Done | 23 tests — basics (name, protocol, dimensions, empty), delegation (all productive, idle agent, idle issue), tool strategy (diverse, retry loop, retry issue, redundant, no tools), coordination overhead (all productive, high overhead, overhead issue), recovery (no failures, with/without recovery, partial, unrecovered issue), termination (clean, wasted steps, no steps) |
+
+### Key Design Decisions
+- **Zero breaking changes** — both scorers are additive, implementing the existing `Scorer` protocol
+- **Content vs. structure separation** — IntrinsicReasoningScorer analyzes message text content; OrchestrationScorer analyzes step-level structure and patterns
+- **Regex-based analysis** — no LLM calls required; both scorers are deterministic and zero-dependency
+- **Scorer Registry names** — `intrinsic_reasoning` and `orchestration` (registry), `intrinsic` and `orchestration` (CLI shorthand)
+- **Tool Strategy partially covers Phase 5 item #8** — redundancy detection, retry loop detection, and diversity scoring are now built in
+
+---
+
 ## Phase 5: Strategic Roadmap
 
 Based on domain research (18 libraries, 30+ papers, 15 adjacent projects, 8 community sources, 12 RL systems, 6 observability platforms evaluated).
@@ -448,7 +491,7 @@ Items sorted by priority then effort. **Do the next unchecked item.**
 | 5 | Per-Agent Credit Assignment | Evaluation | Large | Not Started | #1 stated gap; prerequisite for meaningful multi-agent RL |
 | 6 | Process Reward Scorer | Evaluation | Large | Not Started | Unlocks step-level RL; build before RL bridges (synergy) |
 | 7 | Google ADK Adapter | Ingestion | Medium | Not Started | Fast-growing Google ecosystem (~15.6k stars) |
-| 8 | Tool Strategy Scorer | Evaluation | Medium | Not Started | Higher-signal tool eval than current failure-rate checks |
+| 8 | ~~Tool Strategy Scorer~~ | Evaluation | Medium | **Partially Done** | Covered by `OrchestrationScorer.tool_strategy` dimension |
 | 9 | veRL Integration Bridge | RL | Medium | Not Started | Production-scale RL (ByteDance/NVIDIA) |
 | 10 | OpenRLHF Integration Bridge | RL | Medium | Not Started | Distributed RL; pairs with process rewards |
 | 11 | Population-Based Prompt Evolution | RL | Large | Not Started | Extends TuningLoop; avoids local optima |

@@ -25,6 +25,8 @@ pip install -e /path/to/evallab
 | LangGraph adapter | none | base install |
 | OpenTelemetry GenAI adapter | none | base install |
 | Numeric consistency scorer | none | base install |
+| Intrinsic reasoning scorer | none | base install |
+| Orchestration effectiveness scorer | none | base install |
 | Rule-based issue detection scorer | none | base install |
 | Reward functions (Weighted, Deduction, Composite) | none | base install |
 | Text / JSON / HTML reporting | none | base install |
@@ -77,7 +79,7 @@ agent_eval/
   src/agent_eval/
     core/           # Episode, Step, ScoreVector, Protocol classes
     adapters/       # AutoGen, LangGraph, OpenTelemetry trace -> Episode converters
-    scorers/        # Numeric, Rules, LLM Judge, DeepEval, Ragas
+    scorers/        # Numeric, Rules, Reasoning, Orchestration, LLM Judge, DeepEval, Ragas
     rewards/        # WeightedSum, Deduction, Composite reward functions
     rl/             # TuningLoop, TRL bridge, DSPy bridge, reward server
     pipeline/       # EvalPipeline orchestration, batch, comparison
@@ -100,7 +102,7 @@ agent_eval/
 
 ## Testing
 
-All 495 tests run without installing the package:
+All 526 tests run without installing the package:
 
 ```bash
 cd evallab
@@ -133,6 +135,8 @@ PYTHONPATH=src pytest tests/experimental/ -v
 | `tests/adapters/otel/` | OTLP JSON -> Episode, span→step mapping, attribute unwrapping, legacy attribute fallback, edge cases |
 | `tests/scorers/numeric/` | Number extraction from text and tool results, numeric fabrication detection |
 | `tests/scorers/rules/` | Deduction-based scoring (100pt base), 6-category issue detection |
+| `tests/scorers/reasoning/` | Intrinsic reasoning scorer: depth, coherence, self-correction, plan quality |
+| `tests/scorers/orchestration/` | Orchestration scorer: delegation, tool strategy, overhead, recovery, termination |
 | `tests/scorers/llm_judge/` | LLM-as-Judge with mock functions, batch/individual modes, JSON fallback |
 | `tests/scorers/deepeval/` | Import guard when deepeval not installed |
 | `tests/scorers/test_registry.py` | Scorer auto-registration, plugin discovery |
@@ -209,6 +213,8 @@ Ask these questions about your agent:
 | Does it retrieve data via tools and report numbers? | `NumericConsistencyScorer` — catches fabricated numbers |
 | Does it use tools at all? | `IssueDetectorScorer` — checks tool failures, coordination, errors |
 | Is it a multi-agent system? | `IssueDetectorScorer` — detects stalls, agent imbalance, delegation issues |
+| Is my model reasoning well? | `IntrinsicReasoningScorer` — evaluates depth, coherence, self-correction, planning |
+| Is my orchestration effective? | `OrchestrationScorer` — evaluates delegation, tool strategy, overhead, recovery |
 | Do I need subjective quality assessment? | `LLMJudgeScorer` — evaluates coherence, relevance, or custom criteria |
 | Does it do RAG (retrieval + generation)? | `DeepEvalScorer` or `RagasScorer` — faithfulness, context quality |
 | Do I just need a quick pass/fail? | `IssueDetectorScorer` alone is enough |
@@ -225,8 +231,8 @@ Ask these questions about your agent:
 scorers = [IssueDetectorScorer()]
 
 # Data analysis agent (queries databases, reports numbers)
-# -> Need numeric check + general issues
-scorers = [NumericConsistencyScorer(), IssueDetectorScorer()]
+# -> Need numeric check + general issues + orchestration quality
+scorers = [NumericConsistencyScorer(), IssueDetectorScorer(), OrchestrationScorer()]
 
 # Research agent (searches web, synthesizes information)
 # -> Need general issues + LLM judge for answer quality
@@ -236,10 +242,16 @@ scorers = [IssueDetectorScorer(), LLMJudgeScorer(llm_fn=call_llm)]
 # -> Need faithfulness check + general issues
 scorers = [IssueDetectorScorer(), DeepEvalScorer(metric_name="FaithfulnessMetric")]
 
+# Multi-agent diagnostic (is my model bad or my orchestration bad?)
+# -> Separates reasoning quality from workflow quality
+scorers = [IntrinsicReasoningScorer(), OrchestrationScorer(), IssueDetectorScorer()]
+
 # Production multi-agent system (full evaluation)
-# -> Everything: numbers, rules, subjective quality
+# -> Everything: numbers, rules, reasoning, orchestration, subjective quality
 scorers = [
     NumericConsistencyScorer(),
+    IntrinsicReasoningScorer(),
+    OrchestrationScorer(),
     IssueDetectorScorer(),
     LLMJudgeScorer(
         llm_fn=call_llm,
@@ -261,6 +273,7 @@ The AutoGen adapter reads `event.txt` files produced by AutoGen's event logging.
 from agent_eval.adapters.autogen import AutoGenAdapter
 from agent_eval.scorers.numeric import NumericConsistencyScorer
 from agent_eval.scorers.rules import IssueDetectorScorer
+from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
 from agent_eval.pipeline.runner import EvalPipeline
 
 adapter = AutoGenAdapter(
@@ -272,9 +285,11 @@ adapter = AutoGenAdapter(
 #   so we need to verify reported numbers match tool outputs.
 # IssueDetectorScorer: multi-agent system, so we also check for coordination
 #   problems, tool failures, and answer quality.
+# OrchestrationScorer: detects idle agents, tool retry loops, coordination
+#   overhead, failure recovery, and wasted steps after the answer.
 pipeline = EvalPipeline(
     adapter=adapter,
-    scorers=[NumericConsistencyScorer(), IssueDetectorScorer()],
+    scorers=[NumericConsistencyScorer(), IssueDetectorScorer(), OrchestrationScorer()],
 )
 
 # Single log
@@ -670,6 +685,8 @@ This section explains every evaluation technique available in agent-eval, how ea
 |--------------|----------|-------------|
 | Catch hallucinated numbers | `NumericConsistencyScorer` | None |
 | Run a general quality check | `IssueDetectorScorer` | None |
+| Diagnose model reasoning quality | `IntrinsicReasoningScorer` | None |
+| Diagnose orchestration effectiveness | `OrchestrationScorer` | None |
 | Get a 0-100 score with a letter grade | `RuleBasedScorer` (used automatically by the pipeline) | None |
 | Evaluate subjective quality (coherence, helpfulness) | `LLMJudgeScorer` | Any LLM API |
 | Use DeepEval metrics (faithfulness, toxicity, bias) | `DeepEvalScorer` | `deepeval` |
@@ -764,7 +781,98 @@ for issue in issues:
 
 ---
 
-#### 3. RuleBasedScorer (`rule_based`)
+#### 3. IntrinsicReasoningScorer (`intrinsic_reasoning`)
+
+**What it does:** Evaluates the reasoning capabilities exhibited in agent messages, independent of orchestration quality. Answers the question: "Is the model reasoning well?"
+
+**How it works — 4 dimensions:**
+
+| Dimension | What it measures | Score |
+|-----------|-----------------|-------|
+| `reasoning_depth` | Ratio of MESSAGE steps containing reasoning markers (therefore, because, first...then, if...then, causal chains) | 0.0 = no markers, 1.0 = all steps |
+| `reasoning_coherence` | Detects contradictions between sequential messages from the same agent (assertion followed by negation with shared key words) | 1.0 = no contradictions |
+| `self_correction` | Detects retraction/correction patterns ("actually", "I was wrong", "let me reconsider") in substantive messages (>20 chars) | Ratio of corrections to opportunities |
+| `plan_quality` | Detects planning structures (numbered lists, "step 1/2/3", "first/next/finally"). Scores: plan present (0.33), multi-step (0.66), actionable steps with verbs (1.0) | 0.0-1.0 composite |
+
+**Issues detected:**
+- No reasoning markers → WARNING "Shallow reasoning"
+- Contradictions found → WARNING per contradiction
+- No planning in multi-step tasks (>5 steps) → INFO "No explicit planning"
+
+**When to use:**
+- Diagnosing whether poor performance is caused by weak model reasoning vs. bad orchestration.
+- Comparing model quality across different LLMs running the same workflow.
+- Research on reasoning capabilities in agent traces.
+
+**Example:**
+```python
+from agent_eval.scorers.reasoning.intrinsic import IntrinsicReasoningScorer
+
+scorer = IntrinsicReasoningScorer()
+dims = scorer.score(episode)
+# [reasoning_depth=0.8, reasoning_coherence=1.0, self_correction=0.2, plan_quality=0.67]
+
+issues = scorer.detect_issues(episode)
+# [WARNING: "Contradiction detected in Agent1's messages"]
+```
+
+---
+
+#### 4. OrchestrationScorer (`orchestration`)
+
+**What it does:** Evaluates the quality of multi-agent workflow orchestration independent of individual agent reasoning. Answers the question: "Is my orchestration effective?"
+
+**How it works — 5 dimensions:**
+
+| Dimension | What it measures | Score |
+|-----------|-----------------|-------|
+| `delegation_efficiency` | Ratio of agents with productive steps (tool calls or substantive messages >20 chars) to total agents | 1.0 = all agents contribute |
+| `tool_strategy` | Tool selection quality: penalizes repeated failed calls, low diversity, and redundant calls (same tool+args). Three penalty categories, each weighted equally. | 1.0 = optimal strategy |
+| `coordination_overhead` | Ratio of productive steps (TOOL_CALL, TOOL_RESULT, FACT_CHECK) to total steps. Pure MESSAGE chatter is overhead. | 1.0 = all steps productive |
+| `recovery_effectiveness` | When tool failures occur: successful_recoveries / total_failures. 1.0 if no failures. | 1.0 = full recovery |
+| `termination_quality` | Detects wasted steps after the substantive answer is reached. 1 - (wasted / total). | 1.0 = clean termination |
+
+**Issues detected:**
+- Agent with 0 productive steps → WARNING "Idle agent: {name}"
+- Same failed tool retried 3+ times → ERROR "Tool retry loop: {tool_name}"
+- Productive step ratio < 0.3 → WARNING "High coordination overhead"
+- No recovery from failure → WARNING "Unrecovered tool failure"
+
+**When to use:**
+- Multi-agent systems where you need to diagnose workflow quality.
+- Comparing different orchestration strategies with the same model.
+- Detecting anti-patterns: idle agents, retry loops, chattiness, failure to recover.
+
+**Example:**
+```python
+from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
+
+scorer = OrchestrationScorer()
+dims = scorer.score(episode)
+# [delegation_efficiency=0.8, tool_strategy=1.0, coordination_overhead=0.6,
+#  recovery_effectiveness=1.0, termination_quality=0.9]
+
+issues = scorer.detect_issues(episode)
+# [WARNING: "Idle agent: Observer", WARNING: "High coordination overhead: only 30% of steps are productive"]
+```
+
+**Using both scorers together for diagnostics:**
+```python
+from agent_eval.scorers.reasoning.intrinsic import IntrinsicReasoningScorer
+from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
+from agent_eval.pipeline.runner import EvalPipeline
+
+# If intrinsic scores are low but orchestration is high → model is the bottleneck
+# If orchestration scores are low but intrinsic is high → workflow is the bottleneck
+pipeline = EvalPipeline(
+    adapter=adapter,
+    scorers=[IntrinsicReasoningScorer(), OrchestrationScorer(), IssueDetectorScorer()],
+)
+```
+
+---
+
+#### 5. RuleBasedScorer (`rule_based`)
 
 **What it does:** Produces a 0-100 overall quality score with a letter grade. Uses a deduction-and-bonus formula.
 
@@ -795,7 +903,7 @@ print(grader.get_grade(dims[0].value))  # "B"
 
 ---
 
-#### 4. LLMJudgeScorer (`llm_judge`)
+#### 6. LLMJudgeScorer (`llm_judge`)
 
 **What it does:** Uses any LLM as an evaluator to score agent episodes on configurable quality dimensions. This is the most flexible scorer — it can assess anything you can describe in natural language.
 
@@ -849,7 +957,7 @@ judge = LLMJudgeScorer(
 
 ---
 
-#### 5. DeepEvalScorer (`deepeval`)
+#### 7. DeepEvalScorer (`deepeval`)
 
 **What it does:** Wraps any [DeepEval](https://docs.confident-ai.com/) metric into the agent-eval scorer protocol. DeepEval provides 50+ LLM-powered evaluation metrics.
 
@@ -888,7 +996,7 @@ scorer = DeepEvalScorer(
 
 ---
 
-#### 6. RagasScorer (`ragas`)
+#### 8. RagasScorer (`ragas`)
 
 **What it does:** Wraps [Ragas](https://docs.ragas.io/) metrics for evaluating RAG (Retrieval-Augmented Generation) quality.
 
@@ -1026,9 +1134,15 @@ Good for: CI/CD gates, quick quality checks, development iteration.
 
 **Standard (catches most issues):**
 ```python
-scorers = [NumericConsistencyScorer(), IssueDetectorScorer()]
+scorers = [NumericConsistencyScorer(), IssueDetectorScorer(), OrchestrationScorer()]
 ```
 Good for: Agents that use tools and report data. This is the default used by the CLI.
+
+**Diagnostic (separate model vs. orchestration quality):**
+```python
+scorers = [IntrinsicReasoningScorer(), OrchestrationScorer(), IssueDetectorScorer()]
+```
+Good for: Multi-agent systems where you need to answer "is my model bad or my orchestration bad?"
 
 **Comprehensive (adds subjective evaluation):**
 ```python

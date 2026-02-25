@@ -2,6 +2,7 @@ from agent_eval.adapters.autogen.adapter import AutoGenAdapter
 from agent_eval.pipeline.runner import EvalPipeline
 from agent_eval.scorers.numeric.consistency import NumericConsistencyScorer
 from agent_eval.scorers.rules.issue_detector import IssueDetectorScorer
+from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
 from agent_eval.reporting.text import format_report
 
 # 1. Parse the log into an Episode
@@ -19,7 +20,7 @@ print(f"Duration: {episode.duration_seconds}s")
 # 2. Run the evaluation pipeline
 pipeline = EvalPipeline(
     adapter=adapter,
-    scorers=[NumericConsistencyScorer(), IssueDetectorScorer()],
+    scorers=[NumericConsistencyScorer(), IssueDetectorScorer(), OrchestrationScorer()],
 )
 result = pipeline.evaluate(episode)
 

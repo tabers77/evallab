@@ -106,6 +106,13 @@ class ScorerRegistry:
         self._registry.setdefault("issue_detector", IssueDetectorScorer)
         self._registry.setdefault("rule_based", RuleBasedScorer)
 
+        # Reasoning & orchestration scorers
+        from agent_eval.scorers.reasoning.intrinsic import IntrinsicReasoningScorer
+        from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
+
+        self._registry.setdefault("intrinsic_reasoning", IntrinsicReasoningScorer)
+        self._registry.setdefault("orchestration", OrchestrationScorer)
+
         # LLM Judge (requires an llm_fn argument)
         from agent_eval.scorers.llm_judge.judge import LLMJudgeScorer
 
