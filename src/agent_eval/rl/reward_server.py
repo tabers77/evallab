@@ -4,7 +4,7 @@ Exposes a ``/reward`` endpoint that accepts batches of
 (prompt, completion) pairs and returns scalar rewards.
 
 Requires ``fastapi`` and ``uvicorn`` — installed via
-``pip install agent-eval[rl]``.
+``pip install agent-eval[server]``.
 
 Usage::
 

@@ -35,6 +35,8 @@ pip install -e /path/to/evallab
 | DeepEval scorer wrapper | `deepeval` | `pip install -e /path/to/evallab[deepeval]` |
 | Ragas scorer wrapper | `ragas` | `pip install -e /path/to/evallab[ragas]` |
 | RL training (TRL, GRPO) | `torch`, `trl` | `pip install -e /path/to/evallab[rl]` |
+| Reward server (HTTP API) | `fastapi`, `uvicorn` | `pip install -e /path/to/evallab[server]` |
+| DSPy prompt optimization bridge | `dspy-ai` | `pip install -e /path/to/evallab[dspy]` |
 | Dev tools (pytest, black, ruff) | — | `pip install -e /path/to/evallab[dev]` |
 | Everything | — | `pip install -e /path/to/evallab[all]` |
 
@@ -60,6 +62,83 @@ Once installed, use it in your code:
 from agent_eval.core.models import Episode, Step
 from agent_eval.pipeline.eval_pipeline import EvalPipeline
 ```
+
+### Docker Compose integration
+
+To use agent-eval from another project running in Docker, mount or copy the evallab directory into your container and install only the extras you need.
+
+**Option A: Volume mount (live development)**
+
+Mount the local evallab path so changes are reflected immediately.
+
+`docker-compose.yml` in your other project:
+
+```yaml
+services:
+  your-app:
+    build: .
+    volumes:
+      - /path/to/evallab:/evallab
+```
+
+`Dockerfile` in your other project:
+
+```dockerfile
+FROM python:3.10-slim
+
+# Install your project deps first (cached layer)
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# Install evallab with only the extras you need
+RUN pip install -e "/evallab[autogen]"
+
+COPY . /app
+WORKDIR /app
+CMD ["python", "main.py"]
+```
+
+**Option B: Copy (reproducible builds)**
+
+Copy evallab into the build context for a self-contained image.
+
+`docker-compose.yml`:
+
+```yaml
+services:
+  your-app:
+    build:
+      context: .
+      additional_contexts:
+        evallab: /path/to/evallab
+```
+
+`Dockerfile`:
+
+```dockerfile
+FROM python:3.10-slim
+
+COPY --from=evallab . /evallab
+RUN pip install -e "/evallab[autogen]"
+
+COPY . /app
+WORKDIR /app
+CMD ["python", "main.py"]
+```
+
+**Selective install examples:**
+
+```bash
+# Only what you need — avoids pulling heavy deps like torch (~2GB)
+pip install -e "/evallab[autogen]"            # just AutoGen adapter
+pip install -e "/evallab[server]"             # just reward server (FastAPI)
+pip install -e "/evallab[autogen,server]"     # combine groups
+pip install -e "/evallab[dspy]"               # just DSPy bridge
+pip install -e "/evallab"                     # core only (zero deps)
+pip install -e "/evallab[all]"                # everything
+```
+
+> **Tip:** The `[server]` extra installs only FastAPI + uvicorn (~5MB). The `[rl]` extra installs torch + trl (~2GB). Keep them separate unless you need both.
 
 ## Quick Start
 
