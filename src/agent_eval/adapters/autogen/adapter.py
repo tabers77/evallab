@@ -306,10 +306,11 @@ class AutoGenAdapter:
         tool_name = event.get("tool") or event.get("tool_name", "unknown")
         result = event.get("result", "")
         succeeded = not is_tool_call_failed(result)
+        agent_id = event.get("agent_id", "")
         return Step(
             kind=StepKind.TOOL_CALL,
-            agent_id="",
-            agent_name="",
+            agent_id=agent_id,
+            agent_name=self._resolve_agent_name(agent_id),
             tool_name=tool_name,
             tool_args=event.get("arguments"),
             tool_result=result,

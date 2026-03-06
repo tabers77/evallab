@@ -106,6 +106,42 @@ class TestFrameworkAgentTagging:
         assert worker_steps[0].agent_name == "FinanceExpert"
 
 
+class TestToolCallAgentIdResolution:
+    """ToolCall events (not ToolCallEvent) should resolve agent_id."""
+
+    def test_tool_call_with_agent_id(self):
+        adapter = AutoGenAdapter(agent_names=["FinanceExpert"])
+        events = [
+            {
+                "type": "ToolCall",
+                "agent_id": "FinanceExpert_abc12345-1234-1234-1234-123456789abc/abc12345-1234-1234-1234-123456789abc",
+                "tool": "get_product_finances",
+                "arguments": {"customer": "TestCorp"},
+                "result": "revenue: 100000",
+            }
+        ]
+        steps = adapter._events_to_steps(events)
+        assert len(steps) == 1
+        assert steps[0].kind == StepKind.TOOL_CALL
+        assert steps[0].agent_name == "FinanceExpert"
+        assert steps[0].tool_name == "get_product_finances"
+
+    def test_tool_call_without_agent_id(self):
+        """Old-format ToolCall events without agent_id still work."""
+        adapter = AutoGenAdapter()
+        events = [
+            {
+                "type": "ToolCall",
+                "tool": "search",
+                "result": "found",
+            }
+        ]
+        steps = adapter._events_to_steps(events)
+        assert len(steps) == 1
+        assert steps[0].agent_name == ""
+        assert steps[0].agent_id == ""
+
+
 class TestConfigurableAnswerPatterns:
     def test_default_answer_tag(self):
         adapter = AutoGenAdapter()
