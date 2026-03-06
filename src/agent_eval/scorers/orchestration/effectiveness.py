@@ -25,7 +25,24 @@ class OrchestrationScorer:
 
     Analyzes Episode-level structure (step ordering, agent transitions,
     tool patterns) rather than message content.
+
+    Parameters
+    ----------
+    min_productive_message_len
+        Minimum character count for a MESSAGE step to be considered
+        productive.  Default ``20``.
+    overhead_threshold
+        If the productive-step ratio falls below this value the scorer
+        emits a "High coordination overhead" warning.  Default ``0.3``.
     """
+
+    def __init__(
+        self,
+        min_productive_message_len: int = 20,
+        overhead_threshold: float = 0.3,
+    ) -> None:
+        self.min_productive_message_len = min_productive_message_len
+        self.overhead_threshold = overhead_threshold
 
     @property
     def name(self) -> str:
@@ -92,7 +109,7 @@ class OrchestrationScorer:
 
         # High coordination overhead
         productive_ratio = self._compute_coordination_overhead(episode)
-        if productive_ratio < 0.3 and len(episode.steps) > 0:
+        if productive_ratio < self.overhead_threshold and len(episode.steps) > 0:
             issues.append(
                 Issue(
                     severity=Severity.WARNING,
@@ -121,17 +138,21 @@ class OrchestrationScorer:
     # ------------------------------------------------------------------
 
     def _compute_delegation_efficiency(self, episode: Episode) -> float:
-        """Ratio of agents with productive steps to total agents."""
-        all_agents = set()
-        productive_agents = set()
+        """Ratio of agents with productive steps to total agents.
+
+        Framework agents (tagged with ``metadata["framework_agent"]``)
+        are excluded from both the numerator and denominator.
+        """
+        all_agents: set[str] = set()
+        productive_agents: set[str] = set()
 
         for step in episode.steps:
-            if step.agent_name:
+            if step.agent_name and not step.metadata.get("framework_agent"):
                 all_agents.add(step.agent_name)
                 if step.kind in _PRODUCTIVE_KINDS or (
                     step.kind == StepKind.MESSAGE
                     and step.content
-                    and len(step.content) > 20
+                    and len(step.content) > self.min_productive_message_len
                 ):
                     productive_agents.add(step.agent_name)
 
@@ -168,10 +189,26 @@ class OrchestrationScorer:
         return max(0.0, 1.0 - total_penalty / max_penalty)
 
     def _compute_coordination_overhead(self, episode: Episode) -> float:
-        """Ratio of productive steps to total steps."""
+        """Ratio of productive steps to total steps.
+
+        A step is productive if it is a tool call, tool result, or fact
+        check, **or** if it is a MESSAGE with substantive content (length
+        above ``min_productive_message_len``).  Framework-agent messages
+        are never counted as productive.
+        """
         if not episode.steps:
             return 1.0
-        productive = sum(1 for s in episode.steps if s.kind in _PRODUCTIVE_KINDS)
+        productive = 0
+        for s in episode.steps:
+            if s.kind in _PRODUCTIVE_KINDS:
+                productive += 1
+            elif (
+                s.kind == StepKind.MESSAGE
+                and s.content
+                and len(s.content) > self.min_productive_message_len
+                and not s.metadata.get("framework_agent")
+            ):
+                productive += 1
         return productive / len(episode.steps)
 
     def _compute_recovery_effectiveness(self, episode: Episode) -> float:
@@ -229,17 +266,21 @@ class OrchestrationScorer:
     # ------------------------------------------------------------------
 
     def _find_idle_agents(self, episode: Episode) -> list[str]:
-        """Find agents with no productive steps."""
+        """Find agents with no productive steps.
+
+        Framework agents are excluded — they are expected to have
+        minimal visible activity.
+        """
         all_agents: set[str] = set()
         productive_agents: set[str] = set()
 
         for step in episode.steps:
-            if step.agent_name:
+            if step.agent_name and not step.metadata.get("framework_agent"):
                 all_agents.add(step.agent_name)
                 if step.kind in _PRODUCTIVE_KINDS or (
                     step.kind == StepKind.MESSAGE
                     and step.content
-                    and len(step.content) > 20
+                    and len(step.content) > self.min_productive_message_len
                 ):
                     productive_agents.add(step.agent_name)
 

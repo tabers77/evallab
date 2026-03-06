@@ -116,21 +116,26 @@ class TestRuleBasedScorer:
 
 class TestGetGrade:
     def test_grade_a(self):
-        assert RuleBasedScorer.get_grade(95) == "A"
-        assert RuleBasedScorer.get_grade(90) == "A"
+        scorer = RuleBasedScorer()
+        assert scorer.get_grade(95) == "A"
+        assert scorer.get_grade(90) == "A"
 
     def test_grade_b(self):
-        assert RuleBasedScorer.get_grade(85) == "B"
-        assert RuleBasedScorer.get_grade(80) == "B"
+        scorer = RuleBasedScorer()
+        assert scorer.get_grade(85) == "B"
+        assert scorer.get_grade(80) == "B"
 
     def test_grade_c(self):
-        assert RuleBasedScorer.get_grade(75) == "C"
-        assert RuleBasedScorer.get_grade(70) == "C"
+        scorer = RuleBasedScorer()
+        assert scorer.get_grade(75) == "C"
+        assert scorer.get_grade(70) == "C"
 
     def test_grade_d(self):
-        assert RuleBasedScorer.get_grade(65) == "D"
-        assert RuleBasedScorer.get_grade(60) == "D"
+        scorer = RuleBasedScorer()
+        assert scorer.get_grade(65) == "D"
+        assert scorer.get_grade(60) == "D"
 
     def test_grade_f(self):
-        assert RuleBasedScorer.get_grade(55) == "F"
-        assert RuleBasedScorer.get_grade(0) == "F"
+        scorer = RuleBasedScorer()
+        assert scorer.get_grade(55) == "F"
+        assert scorer.get_grade(0) == "F"

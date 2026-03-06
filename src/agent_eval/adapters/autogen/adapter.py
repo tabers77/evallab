@@ -22,6 +22,28 @@ _LOG_FILE_NAMES = ("event.txt", "events.jsonl", "events.json")
 # Glob patterns used by load_episodes to discover log files.
 _LOG_GLOB_PATTERNS = ("event.txt", "events.jsonl", "events.json")
 
+# Regex to strip AutoGen's universal ``_<uuid>/<uuid>`` agent ID suffix.
+_UUID_SUFFIX_RE = re.compile(
+    r"_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    r"(?:/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+)
+
+# Known AutoGen framework-internal agent class names.  These agents are
+# plumbing — they handle routing and orchestration inside group chats and
+# should not be scored as worker agents.
+AUTOGEN_FRAMEWORK_AGENTS: frozenset[str] = frozenset(
+    {
+        "SelectorGroupChatManager",
+        "RoundRobinGroupChatManager",
+        "MagenticOneOrchestrator",
+    }
+)
+
+
+def strip_uuid_suffix(name: str) -> str:
+    """Remove the ``_<uuid>/<uuid>`` suffix added by AutoGen's runtime."""
+    return _UUID_SUFFIX_RE.sub("", name)
+
 
 class AutoGenAdapter:
     """Convert AutoGen event logs into canonical Episodes.
@@ -39,6 +61,19 @@ class AutoGenAdapter:
         the adapter matches by substring.
     orchestrator_name
         The orchestrator agent name to exclude from per-agent turn counts.
+    answer_patterns
+        Ordered list of marker strings used to locate the final answer in
+        the raw log content.  The first match wins.  Defaults to
+        ``["<ANSWER>:", "FINAL ANSWER:", "FINAL_ANSWER"]``.
+    strip_uuids
+        If ``True`` (the default), strip AutoGen's ``_<uuid>/<uuid>``
+        suffix from agent names so that
+        ``FinanceExpert_abc123-.../.../`` becomes ``FinanceExpert``.
+    framework_agents
+        Set of agent class names to tag as framework-internal.  These
+        agents are still included in the Episode but their steps carry
+        ``metadata["framework_agent"] = True`` so scorers can filter
+        them.  Defaults to :data:`AUTOGEN_FRAMEWORK_AGENTS`.
     """
 
     # ----- dispatch table: event "type" → handler method name -----
@@ -60,9 +95,23 @@ class AutoGenAdapter:
         self,
         agent_names: list[str] | None = None,
         orchestrator_name: str = "SalesNegotiator",
+        answer_patterns: list[str] | None = None,
+        strip_uuids: bool = True,
+        framework_agents: frozenset[str] | None = None,
     ) -> None:
         self.agent_names = agent_names or []
         self.orchestrator_name = orchestrator_name
+        self.answer_patterns = answer_patterns or [
+            "<ANSWER>:",
+            "FINAL ANSWER:",
+            "FINAL_ANSWER",
+        ]
+        self.strip_uuids = strip_uuids
+        self.framework_agents = (
+            framework_agents
+            if framework_agents is not None
+            else AUTOGEN_FRAMEWORK_AGENTS
+        )
 
     @property
     def framework_name(self) -> str:
@@ -146,6 +195,11 @@ class AutoGenAdapter:
         source_path: str,
     ) -> Episode:
         steps = self._events_to_steps(raw_events)
+
+        # Tag framework agent steps
+        for step in steps:
+            if step.agent_name and self._is_framework_agent(step.agent_name):
+                step.metadata["framework_agent"] = True
 
         # Determine timestamps
         started_at, ended_at = self._extract_timestamps(raw_events, content)
@@ -357,13 +411,30 @@ class AutoGenAdapter:
     # ------------------------------------------------------------------
 
     def _resolve_agent_name(self, sender: str | None) -> str:
-        """Match a sender string to a known agent name."""
+        """Match a sender string to a known agent name.
+
+        Resolution order:
+        1. If *sender* matches a known ``agent_names`` entry (substring), use it.
+        2. If ``strip_uuids`` is enabled, strip the ``_<uuid>/<uuid>`` suffix.
+        3. Otherwise return *sender* as-is.
+        """
         if not sender:
             return sender or ""
         for name in self.agent_names:
             if name in sender:
                 return name
+        if self.strip_uuids:
+            return strip_uuid_suffix(sender)
         return sender
+
+    def _is_framework_agent(self, agent_name: str) -> bool:
+        """Return ``True`` if *agent_name* matches a known framework agent."""
+        clean = strip_uuid_suffix(agent_name) if self.strip_uuids else agent_name
+        if clean in self.framework_agents:
+            return True
+        if self.orchestrator_name and clean == self.orchestrator_name:
+            return True
+        return False
 
     @staticmethod
     def _parse_timestamp(value: str | None) -> datetime | None:
@@ -406,19 +477,35 @@ class AutoGenAdapter:
 
         return None, None
 
-    @staticmethod
-    def _extract_final_answer(content: str) -> str | None:
-        """Extract the <ANSWER>: block from log content."""
-        answer_start = content.find("<ANSWER>:")
-        if answer_start < 0:
-            if "FINAL_ANSWER" in content:
-                return ""
-            return None
+    def _extract_final_answer(self, content: str) -> str | None:
+        """Extract the final answer from log content.
 
-        answer_end = content.find("</ANSWER>", answer_start)
-        if answer_end < 0:
-            answer_end = content.find("\u2500" * 16, answer_start)
-            if answer_end < 0:
-                answer_end = len(content)
+        Tries each marker in ``self.answer_patterns`` in order. The first
+        marker found wins.  For ``<ANSWER>:`` specifically, the method also
+        looks for a ``</ANSWER>`` closing tag or an em-dash separator.
+        """
+        for pattern in self.answer_patterns:
+            idx = content.find(pattern)
+            if idx < 0:
+                continue
 
-        return content[answer_start:answer_end]
+            # For the XML-style marker, try to find a closing tag
+            if pattern == "<ANSWER>:":
+                answer_end = content.find("</ANSWER>", idx)
+                if answer_end < 0:
+                    answer_end = content.find("\u2500" * 16, idx)
+                    if answer_end < 0:
+                        answer_end = len(content)
+                return content[idx + len(pattern) : answer_end].strip()
+
+            # For other patterns, take everything from the marker to the
+            # next double-newline or end of content (capped at 5000 chars).
+            start = idx + len(pattern)
+            end = content.find("\n\n", start)
+            if end < 0 or end - start > 5000:
+                end = min(start + 5000, len(content))
+            answer = content[start:end].strip()
+            if answer:
+                return answer
+
+        return None

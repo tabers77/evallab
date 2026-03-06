@@ -358,6 +358,9 @@ from agent_eval.pipeline.runner import EvalPipeline
 adapter = AutoGenAdapter(
     agent_names=["FinanceExpert", "CustomerResearcher", "DataVisualiser"],
     orchestrator_name="SalesNegotiator",
+    # UUID suffixes are auto-stripped; framework agents (SelectorGroupChatManager,
+    # MagenticOneOrchestrator, etc.) are auto-detected and tagged so scorers
+    # can exclude them from idle-agent checks and turn-imbalance calculations.
 )
 
 # NumericConsistencyScorer: these agents retrieve financial data via tools,
@@ -905,14 +908,14 @@ issues = scorer.detect_issues(episode)
 
 | Dimension | What it measures | Score |
 |-----------|-----------------|-------|
-| `delegation_efficiency` | Ratio of agents with productive steps (tool calls or substantive messages >20 chars) to total agents | 1.0 = all agents contribute |
+| `delegation_efficiency` | Ratio of agents with productive steps (tool calls or substantive messages >20 chars) to total agents. Framework-internal agents are excluded. | 1.0 = all agents contribute |
 | `tool_strategy` | Tool selection quality: penalizes repeated failed calls, low diversity, and redundant calls (same tool+args). Three penalty categories, each weighted equally. | 1.0 = optimal strategy |
-| `coordination_overhead` | Ratio of productive steps (TOOL_CALL, TOOL_RESULT, FACT_CHECK) to total steps. Pure MESSAGE chatter is overhead. | 1.0 = all steps productive |
+| `coordination_overhead` | Ratio of productive steps to total steps. Productive = TOOL_CALL, TOOL_RESULT, FACT_CHECK, or substantive MESSAGE (>20 chars, non-framework). | 1.0 = all steps productive |
 | `recovery_effectiveness` | When tool failures occur: successful_recoveries / total_failures. 1.0 if no failures. | 1.0 = full recovery |
 | `termination_quality` | Detects wasted steps after the substantive answer is reached. 1 - (wasted / total). | 1.0 = clean termination |
 
 **Issues detected:**
-- Agent with 0 productive steps → WARNING "Idle agent: {name}"
+- Agent with 0 productive steps → WARNING "Idle agent: {name}" (framework agents excluded)
 - Same failed tool retried 3+ times → ERROR "Tool retry loop: {tool_name}"
 - Productive step ratio < 0.3 → WARNING "High coordination overhead"
 - No recovery from failure → WARNING "Unrecovered tool failure"
@@ -927,6 +930,11 @@ issues = scorer.detect_issues(episode)
 from agent_eval.scorers.orchestration.effectiveness import OrchestrationScorer
 
 scorer = OrchestrationScorer()
+# All thresholds are configurable:
+scorer = OrchestrationScorer(
+    min_productive_message_len=20,  # Messages shorter than this are overhead
+    overhead_threshold=0.3,         # Flag when productive ratio falls below this
+)
 dims = scorer.score(episode)
 # [delegation_efficiency=0.8, tool_strategy=1.0, coordination_overhead=0.6,
 #  recovery_effectiveness=1.0, termination_quality=0.9]
@@ -955,7 +963,7 @@ pipeline = EvalPipeline(
 
 **What it does:** Produces a 0-100 overall quality score with a letter grade. Uses a deduction-and-bonus formula.
 
-**How it works:**
+**How it works (all weights and thresholds are configurable):**
 - Start at **100 points**
 - **Deductions:** -25 per CRITICAL, -10 per ERROR, -5 per WARNING
 - **Bonuses:** +5 for detailed answers (>500 chars), +3 for diverse tool use (>=3 tools), +2 for all tools succeeding

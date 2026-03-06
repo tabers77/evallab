@@ -15,17 +15,63 @@ class RuleBasedScorer:
 
     Scoring formula:
       - Base: 100
-      - Deductions: -25 per CRITICAL, -10 per ERROR, -5 per WARNING
-      - Bonuses: +5 for good answer, +3 for tool diversity, +2 for zero failures
+      - Deductions: per CRITICAL / ERROR / WARNING (configurable)
+      - Bonuses: for good answer, tool diversity, zero failures (configurable)
       - Clamped to [0, 100]
 
     Parameters
     ----------
-    issue_scorer
-        Optional scorer to use for issue detection.  When ``None``,
-        issues must be passed via the ``issues`` parameter in
-        :meth:`score_with_issues`.
+    critical_weight
+        Points deducted per CRITICAL issue.  Default ``25``.
+    error_weight
+        Points deducted per ERROR issue.  Default ``10``.
+    warning_weight
+        Points deducted per WARNING issue.  Default ``5``.
+    answer_length_bonus
+        Bonus points awarded when the final answer exceeds
+        ``answer_length_threshold`` characters.  Default ``5``.
+    answer_length_threshold
+        Minimum final-answer length to earn the bonus.  Default ``500``.
+    tool_diversity_bonus
+        Bonus points for using ``tool_diversity_min`` or more unique
+        tools.  Default ``3``.
+    tool_diversity_min
+        Minimum number of unique tools to earn the diversity bonus.
+        Default ``3``.
+    zero_failure_bonus
+        Bonus points when all tool calls succeeded.  Default ``2``.
+    grade_thresholds
+        Dict mapping minimum scores to letter grades, evaluated in
+        descending order.  Default ``{90: "A", 80: "B", 70: "C", 60: "D"}``.
+        Any score below the lowest threshold receives ``"F"``.
     """
+
+    def __init__(
+        self,
+        critical_weight: float = 25,
+        error_weight: float = 10,
+        warning_weight: float = 5,
+        answer_length_bonus: float = 5,
+        answer_length_threshold: int = 500,
+        tool_diversity_bonus: float = 3,
+        tool_diversity_min: int = 3,
+        zero_failure_bonus: float = 2,
+        grade_thresholds: dict[int, str] | None = None,
+    ) -> None:
+        self.critical_weight = critical_weight
+        self.error_weight = error_weight
+        self.warning_weight = warning_weight
+        self.answer_length_bonus = answer_length_bonus
+        self.answer_length_threshold = answer_length_threshold
+        self.tool_diversity_bonus = tool_diversity_bonus
+        self.tool_diversity_min = tool_diversity_min
+        self.zero_failure_bonus = zero_failure_bonus
+        self.grade_thresholds = grade_thresholds or {
+            90: "A",
+            80: "B",
+            70: "C",
+            60: "D",
+        }
 
     @property
     def name(self) -> str:
@@ -53,23 +99,26 @@ class RuleBasedScorer:
 
         for issue in issues:
             if issue.severity == Severity.CRITICAL:
-                score -= 25
+                score -= self.critical_weight
             elif issue.severity == Severity.ERROR:
-                score -= 10
+                score -= self.error_weight
             elif issue.severity == Severity.WARNING:
-                score -= 5
+                score -= self.warning_weight
 
         # Bonuses
-        if episode.final_answer and len(episode.final_answer) > 500:
-            score += 5
+        if (
+            episode.final_answer
+            and len(episode.final_answer) > self.answer_length_threshold
+        ):
+            score += self.answer_length_bonus
 
         tool_steps = episode.steps_by_kind(StepKind.TOOL_CALL)
         unique_tools = {s.tool_name for s in tool_steps if s.tool_name}
-        if len(unique_tools) >= 3:
-            score += 3
+        if len(unique_tools) >= self.tool_diversity_min:
+            score += self.tool_diversity_bonus
 
         if tool_steps and all(s.tool_succeeded is not False for s in tool_steps):
-            score += 2
+            score += self.zero_failure_bonus
 
         score = max(0.0, min(100.0, score))
 
@@ -82,15 +131,9 @@ class RuleBasedScorer:
             )
         ]
 
-    @staticmethod
-    def get_grade(score: float) -> str:
+    def get_grade(self, score: float) -> str:
         """Convert a 0-100 score to a letter grade."""
-        if score >= 90:
-            return "A"
-        elif score >= 80:
-            return "B"
-        elif score >= 70:
-            return "C"
-        elif score >= 60:
-            return "D"
+        for threshold in sorted(self.grade_thresholds, reverse=True):
+            if score >= threshold:
+                return self.grade_thresholds[threshold]
         return "F"

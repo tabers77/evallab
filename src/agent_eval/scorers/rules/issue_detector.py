@@ -29,6 +29,12 @@ class IssueDetectorScorer:
         Threshold for an "excessive LLM calls" warning.
     tool_failure_rate_threshold
         Tool failure rate above this triggers an error.
+    stall_threshold
+        Minimum number of repeated tool-call signatures before flagging
+        a stall.  Default ``3``.
+    imbalance_ratio
+        Maximum allowed ratio between the busiest and quietest agent
+        turn counts before flagging an imbalance.  Default ``5``.
     """
 
     def __init__(
@@ -36,10 +42,14 @@ class IssueDetectorScorer:
         max_execution_seconds: float = 300,
         max_llm_calls: int = 30,
         tool_failure_rate_threshold: float = 0.3,
+        stall_threshold: int = 3,
+        imbalance_ratio: float = 5,
     ) -> None:
         self.max_execution_seconds = max_execution_seconds
         self.max_llm_calls = max_llm_calls
         self.tool_failure_rate_threshold = tool_failure_rate_threshold
+        self.stall_threshold = stall_threshold
+        self.imbalance_ratio = imbalance_ratio
 
     @property
     def name(self) -> str:
@@ -154,23 +164,25 @@ class IssueDetectorScorer:
     def _detect_coordination_issues(self, episode: Episode) -> list[Issue]:
         issues: list[Issue] = []
 
-        # Agent turn counts (excluding orchestrator-like steps)
+        # Agent turn counts — exclude framework agents
         agent_turns: dict[str, int] = {}
         for step in episode.steps:
             if step.kind == StepKind.MESSAGE and step.agent_name:
+                if step.metadata.get("framework_agent"):
+                    continue
                 agent_turns[step.agent_name] = agent_turns.get(step.agent_name, 0) + 1
 
-        # Check for stalls (repeated tool calls)
+        # Check for stalls (repeated tool calls with same args)
         tool_steps = episode.steps_by_kind(StepKind.TOOL_CALL)
         stalls = 0
         previous: list[str] = []
         for ts in tool_steps:
-            sig = f"{ts.agent_name}:{ts.tool_name}"
+            sig = f"{ts.agent_name}:{ts.tool_name}:{ts.tool_args}"
             if sig in previous[-3:]:
                 stalls += 1
             previous.append(sig)
 
-        if stalls > 3:
+        if stalls > self.stall_threshold:
             issues.append(
                 Issue(
                     severity=Severity.ERROR,
@@ -179,12 +191,12 @@ class IssueDetectorScorer:
                 )
             )
 
-        # Agent imbalance
+        # Agent imbalance — only among non-framework agents
         non_orchestrator = {k: v for k, v in agent_turns.items() if v > 0}
         if len(non_orchestrator) > 1:
             max_turns = max(non_orchestrator.values())
             min_turns = min(non_orchestrator.values())
-            if max_turns > min_turns * 5:
+            if max_turns > min_turns * self.imbalance_ratio:
                 issues.append(
                     Issue(
                         severity=Severity.WARNING,
@@ -193,8 +205,12 @@ class IssueDetectorScorer:
                     )
                 )
 
-        # Insufficient delegation
-        active_agents = episode.agents
+        # Insufficient delegation — only count non-framework agents
+        active_agents = {
+            s.agent_name
+            for s in episode.steps
+            if s.agent_name and not s.metadata.get("framework_agent")
+        }
         if len(active_agents) < 2:
             issues.append(
                 Issue(
