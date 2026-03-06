@@ -356,8 +356,10 @@ class AutoGenAdapter:
     # Utility helpers
     # ------------------------------------------------------------------
 
-    def _resolve_agent_name(self, sender: str) -> str:
+    def _resolve_agent_name(self, sender: str | None) -> str:
         """Match a sender string to a known agent name."""
+        if not sender:
+            return sender or ""
         for name in self.agent_names:
             if name in sender:
                 return name
