@@ -1,0 +1,43 @@
+name: Publish to Azure Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to Azure Artifacts
+        env:
+          TWINE_USERNAME: az
+          TWINE_PASSWORD: ${{ secrets.AZURE_ARTIFACTS_PAT }}
+          TWINE_REPOSITORY_URL: https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/upload/
+        run: twine upload dist/*
+
+  # Uncomment to mirror the repo to Azure DevOps Repos
+  # mirror:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+  #
+  #     - name: Mirror to Azure DevOps
+  #       run: |
+  #         git remote add azure https://az:${{ secrets.AZURE_ARTIFACTS_PAT }}@dev.azure.com/storaenso-data-services/PROJECT/_git/evallab
+  #         git push azure --all --force
+  #         git push azure --tags --force
