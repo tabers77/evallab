@@ -6,12 +6,32 @@ on:
       - "v*"
 
 jobs:
+  # Verify the tag is on master before publishing
+  check-branch:
+    runs-on: ubuntu-latest
+    outputs:
+      on_master: ${{ steps.check.outputs.on_master }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if git branch -r --contains ${{ github.sha }} | grep -q 'origin/master'; then
+            echo "on_master=true" >> $GITHUB_OUTPUT
+          else
+            echo "on_master=false" >> $GITHUB_OUTPUT
+            echo "::warning::Tag is not on master branch. Skipping publish."
+          fi
+
   publish:
+    needs: check-branch
+    if: needs.check-branch.outputs.on_master == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 

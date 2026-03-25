@@ -1269,6 +1269,42 @@ pip install fastapi uvicorn
 pip install -e ".[all]"
 ```
 
+## Publishing to Azure Artifacts
+
+The package is published to an internal Azure Artifacts feed so it can be installed by company developers. Publishing is automated via GitHub Actions and triggers when a version tag is pushed to `master`.
+
+### Release workflow
+
+```bash
+# 1. Work on dev branch, make your changes
+
+# 2. When ready to release, merge to master
+git checkout master
+git merge dev
+
+# 3. Bump the version in pyproject.toml (e.g. "0.1.0" -> "0.2.0")
+#    Follow semver: patch for fixes, minor for features, major for breaking changes
+
+# 4. Commit and tag
+git commit -am "Bump version to 0.2.0"
+git tag v0.2.0
+git push origin master --tags
+```
+
+GitHub Actions will build the package and upload it to the `python-internal` feed. The tag **must** be on `master` — tags on other branches are ignored.
+
+### Installing the package
+
+```bash
+# One-time setup: install Azure Artifacts keyring for automatic auth
+pip install keyring artifacts-keyring
+
+# Install the package
+pip install agent-eval --index-url https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
+```
+
+For more details (Docker usage, CI/CD setup, consumer configuration), see [`documentation/azure-artifacts-distribution.md`](documentation/azure-artifacts-distribution.md).
+
 ## Next Steps and Research Directions
 
 > **Full roadmap with priorities and status tracking**: See [`IMPLEMENTATION.md`](IMPLEMENTATION.md) Phase 5.

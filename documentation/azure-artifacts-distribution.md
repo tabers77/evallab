@@ -16,34 +16,29 @@ Azure Artifacts (private PyPI feed)
         +-- Company developers: pip install agent-eval
 ```
 
-## One-time setup
+## Configuration
 
-### 1. Create an Azure Artifacts feed
+- **Azure DevOps org:** `storaenso-data-services`
+- **Azure DevOps project:** `Data Science Products and Projects`
+- **Feed name:** `python-internal` (project-scoped)
+- **Feed URL (upload):** `https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/upload/`
+- **Feed URL (install):** `https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/`
+- **GitHub secret:** `AZURE_ARTIFACTS_PAT` (PAT with Packaging Read & Write scope)
 
-In your company's Azure DevOps organization:
+## One-time setup (already completed)
 
-1. Navigate to **Artifacts** > **Create Feed**.
-2. Name the feed (e.g., `python-internal`).
-3. Set visibility to the organization or specific projects.
-4. Note the feed URL:
-   ```
-   https://pkgs.dev.azure.com/YOURORG/_packaging/python-internal/pypi/simple/
-   ```
+### 1. Azure Artifacts feed
 
-### 2. Create a Personal Access Token (PAT) for publishing
+Created `python-internal` as a project-scoped feed under **Data Science Products and Projects** at:
+https://dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_artifacts
 
-In Azure DevOps:
+### 2. Personal Access Token (PAT)
 
-1. Go to **User Settings** > **Personal Access Tokens** > **New Token**.
-2. Set the scope to **Packaging > Read & Write**.
-3. Save the token value securely.
+Created in Azure DevOps → User Settings → Personal Access Tokens with **Packaging → Read & Write** scope, scoped to the `storaenso-data-services` organization.
 
-### 3. Add the PAT to your GitHub repo
+### 3. GitHub secret
 
-In the personal GitHub repository (evallab):
-
-1. Go to **Settings** > **Secrets and variables** > **Actions**.
-2. Add a new repository secret named `AZURE_ARTIFACTS_PAT` with the token value.
+Added `AZURE_ARTIFACTS_PAT` in GitHub repo → Settings → Secrets and variables → Actions.
 
 ## Publishing workflow
 
@@ -72,14 +67,14 @@ Developers need to configure pip to use the Azure Artifacts feed as an extra ind
 **Option A: pip config (recommended for local dev)**
 
 ```bash
-pip config set global.extra-index-url https://az:{PAT}@pkgs.dev.azure.com/YOURORG/_packaging/python-internal/pypi/simple/
+pip config set global.extra-index-url https://az:{PAT}@pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
 ```
 
 **Option B: per-project requirements.txt**
 
 ```
---extra-index-url https://pkgs.dev.azure.com/YOURORG/_packaging/python-internal/pypi/simple/
-agent-eval[server]==0.2.0
+--extra-index-url https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
+agent-eval==0.1.0
 ```
 
 Authentication is handled via `keyring`, environment variables, or inline PAT.
@@ -98,14 +93,12 @@ pip install agent-eval[all]
 
 ### Docker usage
 
-The Docker volume mount approach is no longer needed. Use a standard `pip install`:
-
 ```dockerfile
 FROM python:3.10-slim
 
 ARG FEED_PAT
-RUN pip install agent-eval[server]==0.2.0 \
-    --extra-index-url https://az:${FEED_PAT}@pkgs.dev.azure.com/YOURORG/_packaging/python-internal/pypi/simple/
+RUN pip install agent-eval[server] \
+    --extra-index-url https://az:${FEED_PAT}@pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
 
 COPY . /app
 WORKDIR /app
@@ -141,7 +134,7 @@ steps:
 
   - task: PipAuthenticate@1
     inputs:
-      artifactFeeds: 'python-internal'
+      artifactFeeds: 'Data Science Products and Projects/python-internal'
 
   - script: pip install agent-eval[server]
 ```
@@ -150,8 +143,7 @@ steps:
 
 To make the source code visible in Azure DevOps (for auditing, code search, etc.), the GitHub Actions workflow includes an optional mirror step. This keeps Azure DevOps as a **read-only mirror** while your personal GitHub remains the source of truth.
 
-To enable it, uncomment the mirror job in `.github/workflows/publish-azure-artifacts.yml` and set:
-- `AZURE_DEVOPS_REPO_URL` as a GitHub Actions variable pointing to your Azure DevOps Git repo URL.
+To enable it, uncomment the mirror job in `.github/workflows/publish-azure-artifacts.yml` and update the project name in the Azure DevOps repo URL.
 
 ## Versioning
 
