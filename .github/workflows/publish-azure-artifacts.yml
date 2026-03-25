@@ -23,10 +23,10 @@ jobs:
 
       - name: Publish to Azure Artifacts
         env:
-          TWINE_USERNAME: az
+          TWINE_USERNAME: PAT
           TWINE_PASSWORD: ${{ secrets.AZURE_ARTIFACTS_PAT }}
           TWINE_REPOSITORY_URL: https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/upload/
-        run: twine upload dist/*
+        run: twine upload --verbose dist/*
 
   # Uncomment to mirror the repo to Azure DevOps Repos
   # mirror:
