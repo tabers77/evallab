@@ -23,6 +23,19 @@ _NUMBER_RE = re.compile(
     r"|\b\d{4,}\b"  # plain large integer (e.g. 283399382)
 )
 
+# Patterns indicating a number is derived/calculated, not a direct tool citation
+_APPROX_PREFIX_RE = re.compile(r"~\s*$")
+_DERIVED_KEYWORDS_RE = re.compile(
+    r"\b(?:approximately|approx|about|around|roughly|estimated?|"
+    r"save|reduce(?:\s+by)?|target|scenario|projected?|"
+    r"assume|potential|up\s+to|at\s+least)\b",
+    re.IGNORECASE,
+)
+# Percentage range patterns like "5.5% to 7.5%" or "16.1%-19.1%"
+_PERCENT_RANGE_RE = re.compile(
+    r"\d+(?:\.\d+)?%?\s*(?:to|-)\s*\d+(?:\.\d+)?%"
+)
+
 
 def extract_numbers_from_text(text: str) -> list[float]:
     """Extract all numeric values from text.
@@ -61,6 +74,71 @@ def extract_numbers_from_text(text: str) -> list[float]:
             pass
 
     return numbers
+
+
+def extract_numbers_with_context(text: str) -> list[dict]:
+    """Extract numbers from text with surrounding context for classification.
+
+    Returns a list of dicts with keys:
+      - ``value``: the numeric value
+      - ``is_approximate``: True if preceded by ``~`` or approximate keywords
+      - ``is_derived``: True if context suggests a calculation or proposal
+      - ``in_percent_range``: True if part of a percentage range pattern
+    """
+    results: list[dict] = []
+    stripped = _CURRENCY_RE.sub("", text)
+
+    # Build a set of positions covered by percent-range patterns
+    range_spans: list[tuple[int, int]] = []
+    for m in _PERCENT_RANGE_RE.finditer(stripped):
+        range_spans.append((m.start(), m.end()))
+
+    def _in_range(pos: int) -> bool:
+        return any(s <= pos < e for s, e in range_spans)
+
+    def _has_approx_prefix(pos: int) -> bool:
+        preceding = stripped[max(0, pos - 5) : pos]
+        return bool(_APPROX_PREFIX_RE.search(preceding))
+
+    def _has_derived_context(pos: int) -> bool:
+        window = stripped[max(0, pos - 60) : pos]
+        return bool(_DERIVED_KEYWORDS_RE.search(window))
+
+    def _classify(pos: int) -> dict:
+        approx = _has_approx_prefix(pos)
+        derived = _has_derived_context(pos)
+        in_range = _in_range(pos)
+        return {
+            "is_approximate": approx,
+            "is_derived": derived or approx,
+            "in_percent_range": in_range,
+        }
+
+    # M/B/K notation
+    mbk_positions: list[tuple[int, int]] = []
+    for match in _MBK_RE.finditer(stripped):
+        num_str = match.group(1).replace(",", "")
+        value = float(num_str)
+        unit = match.group(2).lower()
+        info = _classify(match.start())
+        info["value"] = value * _MBK_MULTIPLIERS[unit]
+        results.append(info)
+        mbk_positions.append((match.start(), match.end()))
+
+    # Standard numbers
+    for match in _NUMBER_RE.finditer(stripped):
+        in_mbk = any(start <= match.start() < end for start, end in mbk_positions)
+        if in_mbk:
+            continue
+        num_str = match.group().replace(",", "")
+        try:
+            info = _classify(match.start())
+            info["value"] = float(num_str)
+            results.append(info)
+        except ValueError:
+            pass
+
+    return results
 
 
 def extract_numbers_from_tool_results(

@@ -12,6 +12,7 @@ from agent_eval.scorers.numeric.extraction import (
     extract_answer_block,
     extract_numbers_from_text,
     extract_numbers_from_tool_results,
+    extract_numbers_with_context,
 )
 
 
@@ -118,8 +119,19 @@ class NumericConsistencyScorer:
         return extract_numbers_from_tool_results(raw_events)
 
     def _find_fabrications(self, episode: Episode) -> list[dict]:
-        """Core validation: compare answer numbers against tool numbers."""
-        answer_numbers = self._get_answer_numbers(episode)
+        """Core validation: compare answer numbers against tool numbers.
+
+        Numbers identified as derived or approximate (via surrounding text
+        context) are not flagged as fabrications — they represent
+        calculations, proposals, or estimates that are not expected to
+        appear verbatim in tool output.
+        """
+        answer_text = episode.final_answer or ""
+        if not answer_text:
+            content = episode.metadata.get("raw_content", "")
+            answer_text = extract_answer_block(content)
+
+        answer_with_ctx = extract_numbers_with_context(answer_text)
         tool_numbers = self._get_tool_numbers(episode)
 
         all_tool_numbers: list[float] = []
@@ -131,8 +143,14 @@ class NumericConsistencyScorer:
 
         issues: list[dict] = []
 
-        for answer_num in answer_numbers:
+        for entry in answer_with_ctx:
+            answer_num = entry["value"]
             if abs(answer_num) < self.min_value:
+                continue
+
+            # Skip derived/approximate numbers — these are calculations,
+            # proposals, or estimates, not direct tool citations.
+            if entry["is_derived"] or entry["in_percent_range"]:
                 continue
 
             found = False
