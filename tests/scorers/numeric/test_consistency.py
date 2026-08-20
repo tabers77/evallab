@@ -129,3 +129,77 @@ class TestNumericConsistencyScorer:
         issues = scorer.detect_issues(ep)
         # Numbers < 1 are skipped
         assert len(issues) == 0
+
+    def test_approximate_numbers_not_flagged(self):
+        """Numbers preceded by ~ should not be flagged as fabrications."""
+        ep = _make_episode(
+            final_answer="Total spend is 17,322.77 with potential savings of ~953",
+            tool_results=[
+                {"tool": "get_spend", "result": {"total": 17322.77}}
+            ],
+        )
+        scorer = NumericConsistencyScorer()
+        issues = scorer.detect_issues(ep)
+        # 17,322.77 matches tool; ~953 is approximate so not flagged
+        assert len(issues) == 0
+
+    def test_derived_keywords_not_flagged(self):
+        """Numbers in derived context (reduce by, save, target) are skipped."""
+        ep = _make_episode(
+            final_answer=(
+                "Total spend is 17,322.77. "
+                "You could target a reduce by 50% to save 8,661"
+            ),
+            tool_results=[
+                {"tool": "get_spend", "result": {"total": 17322.77}}
+            ],
+        )
+        scorer = NumericConsistencyScorer()
+        issues = scorer.detect_issues(ep)
+        # 17,322.77 matches; 50 and 8,661 are derived
+        assert len(issues) == 0
+
+    def test_percent_range_not_flagged(self):
+        """Numbers inside percent range patterns are skipped."""
+        ep = _make_episode(
+            final_answer=(
+                "Total is 94,004.24. Savings could be 5.5% to 7.5%"
+            ),
+            tool_results=[
+                {"tool": "get_spend", "result": {"total": 94004.24}}
+            ],
+        )
+        scorer = NumericConsistencyScorer()
+        issues = scorer.detect_issues(ep)
+        assert len(issues) == 0
+
+    def test_scenario_table_not_flagged(self):
+        """Scenario table with approximate and derived numbers is not flagged."""
+        ep = _make_episode(
+            final_answer=(
+                "Total spend: 17,322.77\n"
+                "| Scenario | Target savings |\n"
+                "| Defensive | reduce by 50%, save approximately 953 |\n"
+                "| Target | reduce by 100%, target savings ~2,790 |\n"
+            ),
+            tool_results=[
+                {"tool": "get_spend", "result": {"total": 17322.77}}
+            ],
+        )
+        scorer = NumericConsistencyScorer()
+        issues = scorer.detect_issues(ep)
+        # Only 17,322.77 is factual and matches tool data
+        assert len(issues) == 0
+
+    def test_factual_fabrication_still_detected(self):
+        """A non-derived number that doesn't match tools is still flagged."""
+        ep = _make_episode(
+            final_answer="Total spend is 25,000.00",
+            tool_results=[
+                {"tool": "get_spend", "result": {"total": 17322.77}}
+            ],
+        )
+        scorer = NumericConsistencyScorer()
+        issues = scorer.detect_issues(ep)
+        assert len(issues) == 1
+        assert issues[0].category == "Data Fabrication"

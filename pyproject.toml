@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-eval"
-version = "0.2.0"
+name = "se-agent-eval"
+version = "0.2.1"
 description = "Framework-agnostic LLM/Agent evaluator with RL support"
 readme = "README.md"
 license = "MIT"
@@ -46,7 +46,7 @@ dspy = [
     "dspy-ai>=2.5",
 ]
 all = [
-    "agent-eval[dev,autogen,llm-judge,rl,deepeval,ragas,server,dspy]",
+    "se-agent-eval[dev,autogen,llm-judge,rl,deepeval,ragas,server,dspy]",
 ]
 
 [project.scripts]

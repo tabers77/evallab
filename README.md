@@ -1078,7 +1078,7 @@ scorer = DeepEvalScorer(
     metric_kwargs={"threshold": 0.7, "model": "gpt-4o-mini"},
 )
 
-# Requires: pip install agent-eval[deepeval]
+# Requires: pip install se-agent-eval[deepeval]
 ```
 
 ---
@@ -1114,7 +1114,7 @@ from agent_eval.scorers.ragas import RagasScorer
 
 scorer = RagasScorer(metric_name="faithfulness")
 
-# Requires: pip install agent-eval[ragas]
+# Requires: pip install se-agent-eval[ragas]
 ```
 
 ---
@@ -1300,7 +1300,7 @@ GitHub Actions will build the package and upload it to the `python-internal` fee
 pip install keyring artifacts-keyring
 
 # Install the package
-pip install agent-eval --index-url https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
+pip install se-agent-eval --index-url https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
 ```
 
 For more details (Docker usage, CI/CD setup, consumer configuration), see [`documentation/azure-artifacts-distribution.md`](documentation/azure-artifacts-distribution.md).
