@@ -1,6 +1,6 @@
 # Distributing agent-eval via Azure Artifacts
 
-This document describes how `agent-eval` is published from a personal GitHub repository to the company's Azure DevOps Artifacts feed, so that company developers can install it with `pip install agent-eval`.
+This document describes how `agent-eval` is published from a personal GitHub repository to the company's Azure DevOps Artifacts feed, so that company developers can install it with `pip install se-agent-eval`.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ Personal GitHub (source of truth)
 
 Azure Artifacts (private PyPI feed)
         |
-        +-- Company developers: pip install agent-eval
+        +-- Company developers: pip install se-agent-eval
 ```
 
 ## Configuration
@@ -74,7 +74,7 @@ pip config set global.extra-index-url https://az:{PAT}@pkgs.dev.azure.com/storae
 
 ```
 --extra-index-url https://pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
-agent-eval==0.1.0
+se-agent-eval==0.1.0
 ```
 
 Authentication is handled via `keyring`, environment variables, or inline PAT.
@@ -83,12 +83,12 @@ Authentication is handled via `keyring`, environment variables, or inline PAT.
 
 ```bash
 # Base install
-pip install agent-eval
+pip install se-agent-eval
 
 # With extras
-pip install agent-eval[server]
-pip install agent-eval[rl]
-pip install agent-eval[all]
+pip install se-agent-eval[server]
+pip install se-agent-eval[rl]
+pip install se-agent-eval[all]
 ```
 
 ### Docker usage
@@ -97,7 +97,7 @@ pip install agent-eval[all]
 FROM python:3.10-slim
 
 ARG FEED_PAT
-RUN pip install agent-eval[server] \
+RUN pip install se-agent-eval[server] \
     --extra-index-url https://az:${FEED_PAT}@pkgs.dev.azure.com/storaenso-data-services/Data%20Science%20Products%20and%20Projects/_packaging/python-internal/pypi/simple/
 
 COPY . /app
@@ -136,7 +136,7 @@ steps:
     inputs:
       artifactFeeds: 'Data Science Products and Projects/python-internal'
 
-  - script: pip install agent-eval[server]
+  - script: pip install se-agent-eval[server]
 ```
 
 ## Optional: Mirror repo to Azure DevOps
