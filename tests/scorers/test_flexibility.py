@@ -249,25 +249,45 @@ class TestConfigurableDeductions:
         assert scorer.get_grade(45) == "C"
         assert scorer.get_grade(30) == "F"
 
-    def test_custom_bonus_thresholds(self):
+    def test_custom_deduction_weights(self):
+        """Deduction weights remain configurable.
+
+        Supersedes ``test_custom_bonus_thresholds``, which asserted that the
+        answer-length bonus threshold was configurable. 0.3.0 removed the
+        answer-length and tool-diversity bonuses outright (audit F4): they paid
+        for verbosity and busywork, so "configurable reward hacking" was not a
+        feature worth keeping. The configurability *intent* of this test is
+        preserved here against the knobs that survive.
+
+        Note the original kept a non-empty issue list "so bonus difference is
+        visible" — because the base is 100 and the score clamps to [0, 100],
+        bonuses are invisible without a deduction. Same reason
+        tests/scorers/rules/test_reward_hacking_probe.py holds a fixed issue
+        set.
+        """
         ep = _make_episode(
-            final_answer="A" * 200,  # Below default 500, above custom 100
+            final_answer="A" * 200,
             steps=[
                 _tool("t1", succeeded=True),
                 _tool("t2", succeeded=True),
             ],
         )
-        # Add issues to bring base below 100 so bonus difference is visible
         issues = [Issue(Severity.WARNING, "Test", "W1")]
 
-        # Default: 500 char threshold → no answer bonus → 95
-        default_scorer = RuleBasedScorer()
-        dims = default_scorer.score_with_issues(ep, issues)
-        default_score = dims[0].value
+        default_score = RuleBasedScorer().score_with_issues(ep, issues)[0].value
+        harsh_score = (
+            RuleBasedScorer(warning_weight=30).score_with_issues(ep, issues)[0].value
+        )
 
-        # Custom: 100 char threshold → gets answer bonus → 100
-        custom_scorer = RuleBasedScorer(answer_length_threshold=100)
-        dims = custom_scorer.score_with_issues(ep, issues)
-        custom_score = dims[0].value
+        assert harsh_score < default_score, (
+            f"warning_weight had no effect ({harsh_score} vs {default_score})"
+        )
 
-        assert custom_score > default_score
+    def test_removed_bonuses_are_not_configurable(self):
+        """The reward-hacking knobs must stay gone (audit F4 regression guard)."""
+        import pytest
+
+        for kwarg in ("answer_length_bonus", "answer_length_threshold",
+                      "tool_diversity_bonus", "tool_diversity_min"):
+            with pytest.raises(TypeError):
+                RuleBasedScorer(**{kwarg: 1})

@@ -37,6 +37,16 @@ class ScoreDimension:
     value: float
     max_value: float = 1.0
     source: str = ""
+    # 0.3.0 — the judge is asked for a justification and always returned one;
+    # it was parsed and thrown away, so a stored score could not be explained
+    # or disputed after the fact (audit F8).
+    justification: str | None = None
+    # 0.3.0 — set when a scorer could NOT evaluate this dimension (API error,
+    # unparseable response). Previously such a failure was recorded as
+    # value=0.0, indistinguishable from a genuinely terrible answer, and it
+    # dragged the aggregate down (audit F5). Abstained dimensions are excluded
+    # from ``ScoreVector.overall``.
+    abstained: bool = False
 
     @property
     def normalized(self) -> float:
@@ -59,15 +69,37 @@ class ScoreVector:
     issues: list[Issue] = field(default_factory=list)
 
     @property
-    def overall(self) -> float:
-        """Weighted average of normalized dimension values.
+    def scored_dimensions(self) -> list[ScoreDimension]:
+        """Dimensions that actually produced a score (excludes abstentions)."""
+        return [d for d in self.dimensions if not d.abstained]
 
-        Returns 0.0 if no dimensions are present.
+    @property
+    def all_abstained(self) -> bool:
+        """True when dimensions exist but none could be scored.
+
+        A consumer must treat this as "not measured", NOT as a bad result —
+        ``overall`` returns 0.0 in this case only because there is no honest
+        number to return.
         """
-        if not self.dimensions:
+        return bool(self.dimensions) and not self.scored_dimensions
+
+    @property
+    def overall(self) -> float:
+        """Average of normalized values over the dimensions that scored.
+
+        0.3.0 excludes abstained dimensions (audit F5). Previously a failed
+        judge call was stored as 0.0 and averaged in, so transient API errors
+        showed up as a genuine quality drop — measured at roughly -15 points,
+        with 8.5% of records carrying the signature.
+
+        Returns 0.0 if no dimensions are present, or if every dimension
+        abstained; check :attr:`all_abstained` to tell those apart from a
+        real zero.
+        """
+        scored = self.scored_dimensions
+        if not scored:
             return 0.0
-        total = sum(d.normalized for d in self.dimensions)
-        return total / len(self.dimensions)
+        return sum(d.normalized for d in scored) / len(scored)
 
     def dimension_by_name(self, name: str) -> ScoreDimension | None:
         """Look up a dimension by name."""
@@ -88,6 +120,8 @@ class ScoreVector:
                     "max_value": d.max_value,
                     "normalized": round(d.normalized, 4),
                     "source": d.source,
+                    "justification": d.justification,
+                    "abstained": d.abstained,
                 }
                 for d in self.dimensions
             ],

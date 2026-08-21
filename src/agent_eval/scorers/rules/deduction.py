@@ -16,7 +16,7 @@ class RuleBasedScorer:
     Scoring formula:
       - Base: 100
       - Deductions: per CRITICAL / ERROR / WARNING (configurable)
-      - Bonuses: for good answer, tool diversity, zero failures (configurable)
+      - Bonus: zero tool failures (configurable)
       - Clamped to [0, 100]
 
     Parameters
@@ -27,17 +27,6 @@ class RuleBasedScorer:
         Points deducted per ERROR issue.  Default ``10``.
     warning_weight
         Points deducted per WARNING issue.  Default ``5``.
-    answer_length_bonus
-        Bonus points awarded when the final answer exceeds
-        ``answer_length_threshold`` characters.  Default ``5``.
-    answer_length_threshold
-        Minimum final-answer length to earn the bonus.  Default ``500``.
-    tool_diversity_bonus
-        Bonus points for using ``tool_diversity_min`` or more unique
-        tools.  Default ``3``.
-    tool_diversity_min
-        Minimum number of unique tools to earn the diversity bonus.
-        Default ``3``.
     zero_failure_bonus
         Bonus points when all tool calls succeeded.  Default ``2``.
     grade_thresholds
@@ -51,20 +40,12 @@ class RuleBasedScorer:
         critical_weight: float = 25,
         error_weight: float = 10,
         warning_weight: float = 5,
-        answer_length_bonus: float = 5,
-        answer_length_threshold: int = 500,
-        tool_diversity_bonus: float = 3,
-        tool_diversity_min: int = 3,
         zero_failure_bonus: float = 2,
         grade_thresholds: dict[int, str] | None = None,
     ) -> None:
         self.critical_weight = critical_weight
         self.error_weight = error_weight
         self.warning_weight = warning_weight
-        self.answer_length_bonus = answer_length_bonus
-        self.answer_length_threshold = answer_length_threshold
-        self.tool_diversity_bonus = tool_diversity_bonus
-        self.tool_diversity_min = tool_diversity_min
         self.zero_failure_bonus = zero_failure_bonus
         self.grade_thresholds = grade_thresholds or {
             90: "A",
@@ -105,18 +86,23 @@ class RuleBasedScorer:
             elif issue.severity == Severity.WARNING:
                 score -= self.warning_weight
 
-        # Bonuses
-        if (
-            episode.final_answer
-            and len(episode.final_answer) > self.answer_length_threshold
-        ):
-            score += self.answer_length_bonus
-
+        # Bonuses.
+        #
+        # 0.3.0 removed the answer-length and tool-diversity bonuses (audit
+        # F4). They paid for verbosity and busywork: measured on this scorer,
+        # padding an answer from 55 to 1,376 characters moved it 92.0 -> 97.0,
+        # and going from 1 tool to 5 moved it 92.0 -> 95.0, with no change in
+        # substance either time. An agent optimised against that metric learns
+        # to pad and to spray tool calls.
+        #
+        # They were invisible with zero issues, because the base is 100 and the
+        # score clamps to [0, 100] — which is why this went unnoticed. See
+        # tests/scorers/rules/test_reward_hacking_probe.py, which holds a fixed
+        # non-empty issue set precisely so the bonuses are observable.
+        #
+        # zero_failure_bonus is kept deliberately: "no tool call failed" cannot
+        # be farmed by padding, so it is not a reward-hacking surface.
         tool_steps = episode.steps_by_kind(StepKind.TOOL_CALL)
-        unique_tools = {s.tool_name for s in tool_steps if s.tool_name}
-        if len(unique_tools) >= self.tool_diversity_min:
-            score += self.tool_diversity_bonus
-
         if tool_steps and all(s.tool_succeeded is not False for s in tool_steps):
             score += self.zero_failure_bonus
 

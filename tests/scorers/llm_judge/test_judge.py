@@ -95,7 +95,8 @@ class TestLLMJudgeScorerBatch:
             assert dim.source == "llm_judge"
 
     def test_detect_issues_low_scores(self):
-        def low_scorer(sys_p, usr_p):
+        # 0.3.0 — llm_fn is called with keyword arguments only (audit F7).
+        def low_scorer(system_prompt: str, user_prompt: str) -> str:
             evals = [
                 {"dimension": name, "score": 0.2, "justification": "Bad."}
                 for name in DEFAULT_DIMENSIONS
