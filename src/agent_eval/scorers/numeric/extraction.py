@@ -36,6 +36,31 @@ _PERCENT_RANGE_RE = re.compile(
     r"\d+(?:\.\d+)?%?\s*(?:to|-)\s*\d+(?:\.\d+)?%"
 )
 
+# Regions whose digits are not quantities and must never be read as figures the
+# agent claimed. Both were observed producing CRITICAL "numeric_fabrication"
+# issues on real document-grounded answers, one of which scored 0.0:
+#   - URLs and percent-escapes: "...Packaging%20Solutions%20%26%20Design.txt"
+#     yielded 20 and 26, reported as fabricated monetary values.
+#   - Citation markers: "...Emails/**.[1][2][3]" yielded 1, 2 and 3.
+# Any answer citing sources or linking a file hits this, so it is not an edge
+# case — it is the normal shape of a retrieval-grounded answer.
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+|\S*%[0-9A-Fa-f]{2}\S*")
+_CITATION_RE = re.compile(r"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]")
+
+
+def _mask_non_quantities(text: str) -> str:
+    """Blank out URL and citation regions, preserving every offset.
+
+    Replaces with spaces rather than deleting: the callers classify each number
+    by the text *around* its match position, so shifting offsets would silently
+    misread the approximate/derived context of every later number.
+    """
+
+    def _blank(match: re.Match) -> str:
+        return " " * (match.end() - match.start())
+
+    return _CITATION_RE.sub(_blank, _URL_RE.sub(_blank, text))
+
 
 def extract_numbers_from_text(text: str) -> list[float]:
     """Extract all numeric values from text.
@@ -86,7 +111,7 @@ def extract_numbers_with_context(text: str) -> list[dict]:
       - ``in_percent_range``: True if part of a percentage range pattern
     """
     results: list[dict] = []
-    stripped = _CURRENCY_RE.sub("", text)
+    stripped = _mask_non_quantities(_CURRENCY_RE.sub("", text))
 
     # Build a set of positions covered by percent-range patterns
     range_spans: list[tuple[int, int]] = []

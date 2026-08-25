@@ -6,6 +6,7 @@ from agent_eval.scorers.numeric.extraction import (
     extract_answer_block,
     extract_numbers_from_text,
     extract_numbers_from_tool_results,
+    extract_numbers_with_context,
 )
 
 
@@ -129,3 +130,48 @@ class TestExtractAnswerBlock:
         content = "<ANSWER>: Some answer without closing tag\nMore text"
         block = extract_answer_block(content)
         assert "Some answer" in block
+
+
+class TestNonQuantityRegionsIgnored:
+    """Digits in URLs and citation markers are not figures the agent claimed.
+
+    Both shapes below were observed producing CRITICAL "numeric_fabrication"
+    issues on real document-grounded answers in production — one scored 0.0
+    (grade F) purely on citation markers and URL percent-escapes, on a question
+    that asked whether a SharePoint file was visible and contained no monetary
+    figures at all.
+    """
+
+    def test_percent_escapes_in_a_filename_are_not_numbers(self):
+        text = "See Valona%20Insights_%20Packaging%20Solutions%20%26%20Design.txt"
+        assert extract_numbers_with_context(text) == []
+
+    def test_citation_markers_are_not_numbers(self):
+        text = "The folder is Documents/CopilotAgent/Emails/.[1][2][3]"
+        assert extract_numbers_with_context(text) == []
+
+    def test_multi_number_citation_group(self):
+        assert extract_numbers_with_context("Confirmed by sources [1, 2; 3].") == []
+
+    def test_http_url_digits_are_not_numbers(self):
+        text = "Source: https://example.com/reports/2024/q3?id=98765"
+        assert extract_numbers_with_context(text) == []
+
+    def test_real_figures_beside_a_url_still_extract(self):
+        """Masking must not swallow the quantities the scorer exists to check."""
+        text = "Revenue was 254649476.24 per https://example.com/a%20b.txt"
+        values = [e["value"] for e in extract_numbers_with_context(text)]
+        assert 254649476.24 in values
+
+    def test_real_figures_beside_a_citation_still_extract(self):
+        text = "Contribution margin was 94384457.24 last year.[1]"
+        values = [e["value"] for e in extract_numbers_with_context(text)]
+        assert 94384457.24 in values
+
+    def test_masking_preserves_derived_context(self):
+        """Offsets must not shift, or the approximate/derived flags misread."""
+        text = "See https://example.com/a%20b — approximately 1234.5 tonnes"
+        entries = extract_numbers_with_context(text)
+        assert len(entries) == 1
+        assert entries[0]["value"] == 1234.5
+        assert entries[0]["is_derived"] is True
