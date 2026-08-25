@@ -175,3 +175,54 @@ class TestNonQuantityRegionsIgnored:
         assert len(entries) == 1
         assert entries[0]["value"] == 1234.5
         assert entries[0]["is_derived"] is True
+
+
+class TestDatesAndTimesIgnored:
+    """A date is a label, not a quantity read from a tool.
+
+    "2026-08-25T09:13:06Z" was reported in production as a fabricated 13 and
+    "2026-04-28" as a fabricated 28, both CRITICAL.
+    """
+
+    def test_iso_timestamp(self):
+        text = "Last modified: 2026-08-25T09:13:06Z"
+        assert extract_numbers_with_context(text) == []
+
+    def test_plain_iso_date(self):
+        assert extract_numbers_with_context("PIX newsletter, 2026-04-28.") == []
+
+    def test_clock_time(self):
+        assert extract_numbers_with_context("Delivered at 09:13.") == []
+
+    def test_slash_date(self):
+        assert extract_numbers_with_context("Dated 28/04/2026 in the file.") == []
+
+    def test_a_price_beside_a_date_still_extracts(self):
+        text = "On 2026-04-28 Kraftliner was 795.09 per tonne"
+        values = [e["value"] for e in extract_numbers_with_context(text)]
+        assert values == [795.09]
+
+
+class TestPatternsAreNotSilentlyCorrupted:
+    """A regex holding a control character matches nothing and fails silently.
+
+    `\b` written through a non-raw string becomes a literal backspace (0x08),
+    which compiles fine, greps invisibly, and disables the pattern completely —
+    exactly how the date mask above shipped inert on its first attempt.
+    """
+
+    def test_no_control_characters_in_module_patterns(self):
+        import re as _re
+
+        from agent_eval.scorers.numeric import extraction as mod
+
+        for name in dir(mod):
+            if not name.endswith("_RE"):
+                continue
+            obj = getattr(mod, name)
+            if not isinstance(obj, _re.Pattern):
+                continue
+            offenders = [
+                hex(ord(ch)) for ch in obj.pattern if ord(ch) < 32 and ch != "\n"
+            ]
+            assert not offenders, f"{name} contains control chars {offenders}"

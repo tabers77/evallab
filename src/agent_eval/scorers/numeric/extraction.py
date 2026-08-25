@@ -46,10 +46,18 @@ _PERCENT_RANGE_RE = re.compile(
 # case — it is the normal shape of a retrieval-grounded answer.
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+|\S*%[0-9A-Fa-f]{2}\S*")
 _CITATION_RE = re.compile(r"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]")
+# Dates and clock times. "2026-08-25T09:13:06Z" was reported as a fabricated
+# 13, and "2026-04-28" as a fabricated 28 — a date is a label, never a
+# quantity the agent claimed to have read from a tool.
+_DATETIME_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?"
+    r"|\b\d{1,2}:\d{2}(?::\d{2})?\b"
+    r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b"
+)
 
 
 def _mask_non_quantities(text: str) -> str:
-    """Blank out URL and citation regions, preserving every offset.
+    """Blank out URL, date and citation regions, preserving every offset.
 
     Replaces with spaces rather than deleting: the callers classify each number
     by the text *around* its match position, so shifting offsets would silently
@@ -59,7 +67,9 @@ def _mask_non_quantities(text: str) -> str:
     def _blank(match: re.Match) -> str:
         return " " * (match.end() - match.start())
 
-    return _CITATION_RE.sub(_blank, _URL_RE.sub(_blank, text))
+    masked = _URL_RE.sub(_blank, text)
+    masked = _DATETIME_RE.sub(_blank, masked)
+    return _CITATION_RE.sub(_blank, masked)
 
 
 def extract_numbers_from_text(text: str) -> list[float]:

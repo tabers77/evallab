@@ -24,7 +24,14 @@ from agent_eval.scorers.llm_judge.prompts import (
 logger = logging.getLogger(__name__)
 
 # Maximum characters of a single tool result shown to the judge.
-_RESULT_PREVIEW_CHARS = 200
+#
+# Measured, not guessed. At 200 the judge described real evidence as "a generic
+# HTML chunk" and scored `groundedness` 0.1-0.32 on answers whose figures were
+# correct, because a document-shaped tool result (a market newsletter, a mail
+# folder listing) puts its numbers well past the first 200 characters — the
+# preamble is markup. A five-tool episode used only ~29% of
+# `max_transcript_chars`, so the budget to fix this was already paid for.
+_RESULT_PREVIEW_CHARS = 1200
 
 
 def _tool_status(succeeded: bool | None) -> str:
@@ -39,6 +46,15 @@ def _tool_status(succeeded: bool | None) -> str:
     if succeeded is None:
         return "?"
     return "OK" if succeeded else "FAILED"
+
+
+def _status_of(line: str) -> bool | None:
+    """Recover the outcome already rendered into a tool line."""
+    if "(OK)" in line:
+        return True
+    if "(FAILED)" in line:
+        return False
+    return None
 
 
 def _result_text(step: Step) -> str:
@@ -176,10 +192,11 @@ class LLMJudgeScorer:
                     f"[Tool: {step.tool_name}] "
                     f"({_tool_status(step.tool_succeeded)}) -> {result}"
                 )
-                # Only await a result if this step did not carry one itself.
-                pending_tool = (
-                    None if result else (len(lines) - 1, step.tool_name or "")
-                )
+                # Await the matching result even when this step already carried
+                # one: adapters commonly set it on BOTH steps, and emitting two
+                # lines with the same text spent the transcript budget twice for
+                # no information — measured at +195% versus +81% once merged.
+                pending_tool = (len(lines) - 1, step.tool_name or "")
             elif step.kind == StepKind.TOOL_RESULT:
                 # Adapters split a tool interaction one of two ways: everything
                 # on the TOOL_CALL step, or the call on TOOL_CALL and the output
@@ -193,10 +210,20 @@ class LLMJudgeScorer:
                     and (not step.tool_name or step.tool_name == pending_tool[1])
                 ):
                     idx, name = pending_tool
-                    lines[idx] = (
-                        f"[Tool: {name}] "
-                        f"({_tool_status(step.tool_succeeded)}) -> {result}"
+                    # Keep the longer text — either step may hold the fuller
+                    # copy — and prefer this step's outcome, which is the
+                    # authoritative one: a call that dispatched fine can still
+                    # come back an error, and that must not be masked by the
+                    # call step's optimistic flag.
+                    prior = lines[idx].split(" -> ", 1)
+                    prior_result = prior[1] if len(prior) == 2 else ""
+                    merged = result if len(result) >= len(prior_result) else prior_result
+                    status = (
+                        step.tool_succeeded
+                        if step.tool_succeeded is not None
+                        else _status_of(lines[idx])
                     )
+                    lines[idx] = f"[Tool: {name}] ({_tool_status(status)}) -> {merged}"
                     pending_tool = None
                 elif result or step.tool_name:
                     lines.append(

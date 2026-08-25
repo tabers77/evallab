@@ -78,8 +78,16 @@ class TestResultText:
     def test_falls_back_to_content(self):
         assert _result_text(_result(content="rows: 72")) == "rows: 72"
 
-    def test_truncates(self):
-        assert len(_result_text(_call(result="x" * 5000))) == 200
+    def test_truncates_at_the_configured_budget(self):
+        from agent_eval.scorers.llm_judge.judge import _RESULT_PREVIEW_CHARS
+
+        assert len(_result_text(_call(result="x" * 50000))) == _RESULT_PREVIEW_CHARS
+
+    def test_budget_reaches_past_a_document_preamble(self):
+        """200 chars showed only markup; a document's figures sit far later."""
+        from agent_eval.scorers.llm_judge.judge import _RESULT_PREVIEW_CHARS
+
+        assert _RESULT_PREVIEW_CHARS >= 1000
 
     def test_empty_when_neither_present(self):
         assert _result_text(_call()) == ""
@@ -143,13 +151,40 @@ class TestSelfContainedCallStep:
         text = _transcript([_call(result="rows: 72", succeeded=True)])
         assert text == "[Tool: get_finances] (OK) -> rows: 72"
 
-    def test_a_following_result_step_does_not_duplicate_the_line(self):
+    def test_a_following_result_step_is_merged_not_duplicated(self):
+        """Adapters set the result on both steps; rendering it twice spent the
+        transcript budget twice for no information (+195% vs +81% merged)."""
         text = _transcript([
             _call(result="rows: 72", succeeded=True),
             _result(content="rows: 72", succeeded=True),
         ])
-        assert text.count("rows: 72") == 2  # two distinct steps, both shown
+        assert text.count("rows: 72") == 1
         assert text.count("[Tool: get_finances]") == 1
+
+    def test_merge_keeps_the_longer_text(self):
+        """Either step may hold the fuller copy."""
+        text = _transcript([
+            _call(result="short", succeeded=True),
+            _result(content="a much longer and more complete result", succeeded=True),
+        ])
+        assert "a much longer and more complete result" in text
+        assert text.count("[Tool: get_finances]") == 1
+
+    def test_merge_prefers_the_result_steps_outcome(self):
+        """A call that dispatched fine can still come back an error."""
+        text = _transcript([
+            _call(result="partial", succeeded=True),
+            _result(content="Error: upstream timeout", succeeded=False),
+        ])
+        assert "(FAILED)" in text
+        assert "(OK)" not in text
+
+    def test_merge_keeps_call_status_when_result_is_silent(self):
+        text = _transcript([
+            _call(result="rows: 72", succeeded=True),
+            _result(content="rows: 72"),
+        ])
+        assert "(OK)" in text
 
 
 class TestOtherStepKinds:
