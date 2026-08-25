@@ -65,12 +65,44 @@ _VERB_PATTERN = re.compile(
 _NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?(?:\s*%|[KMBkmb])?\b")
 
 
+# Speakers whose MESSAGE steps are not the agent thinking. Matched on
+# ``agent_id`` or ``agent_name``, case-insensitively.
+_NON_AGENT_SPEAKERS = frozenset({"user", "human"})
+
+
+def _is_agent_message(step: Step) -> bool:
+    """Whether a MESSAGE step is the agent speaking rather than the human.
+
+    The user's prompt is not agent reasoning, and it will never contain
+    "therefore"/"because" by anything the agent did — yet it used to sit in the
+    denominator of every ratio here. A two-message episode
+    ``[user question, agent answer]`` could therefore score at most 0.5 on
+    ``reasoning_depth`` however well the agent reasoned, and exactly 0.0
+    whenever the answer was concise. In a real deployment that produced a
+    "Shallow reasoning: no reasoning markers found in any message" warning on
+    nearly every run, which is a statement about the transcript's shape rather
+    than about the agent.
+    """
+    for field in (step.agent_id, step.agent_name):
+        if field and str(field).strip().lower() in _NON_AGENT_SPEAKERS:
+            return False
+    return True
+
+
 def _get_message_steps(episode: Episode) -> list[Step]:
-    """Return MESSAGE steps with non-empty content."""
+    """Return agent MESSAGE steps with non-empty content.
+
+    Human turns are excluded (see :func:`_is_agent_message`): every dimension
+    in this scorer is a claim about the *agent's* reasoning, so the human's
+    words belong in neither the numerator nor the denominator.
+    """
     return [
         s
         for s in episode.steps
-        if s.kind == StepKind.MESSAGE and s.content and s.content.strip()
+        if s.kind == StepKind.MESSAGE
+        and s.content
+        and s.content.strip()
+        and _is_agent_message(s)
     ]
 
 

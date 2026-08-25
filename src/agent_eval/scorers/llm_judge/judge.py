@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any, Callable
 
-from agent_eval.core.models import Episode, StepKind
+from agent_eval.core.models import Episode, Step, StepKind
 from agent_eval.core.score import Issue, ScoreDimension, Severity
 from agent_eval.scorers.llm_judge.prompts import (
     DEFAULT_DIMENSIONS,
@@ -22,6 +22,35 @@ from agent_eval.scorers.llm_judge.prompts import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Maximum characters of a single tool result shown to the judge.
+_RESULT_PREVIEW_CHARS = 200
+
+
+def _tool_status(succeeded: bool | None) -> str:
+    """Render a tool outcome, distinguishing *unknown* from *failed*.
+
+    ``Step.tool_succeeded`` defaults to ``None`` — "not recorded". Collapsing
+    that to "FAILED" told the judge a tool had failed whenever an adapter simply
+    did not set the flag, which is a claim the data does not support. The judge
+    then marked well-sourced answers ungrounded. Unknown renders as ``?`` so the
+    judge can weigh it as missing evidence rather than as a failure.
+    """
+    if succeeded is None:
+        return "?"
+    return "OK" if succeeded else "FAILED"
+
+
+def _result_text(step: Step) -> str:
+    """Best available result text for a tool step, truncated for the prompt.
+
+    Adapters put the output on ``tool_result`` or on ``content`` depending on
+    which step kind carries it; read both rather than assuming one.
+    """
+    for value in (step.tool_result, step.content):
+        if value:
+            return str(value)[:_RESULT_PREVIEW_CHARS]
+    return ""
 
 # The LLM callable is invoked with KEYWORD arguments only:
 #     llm_fn(system_prompt=..., user_prompt=...) -> response text
@@ -125,18 +154,59 @@ class LLMJudgeScorer:
     # ------------------------------------------------------------------
 
     def _build_transcript(self, episode: Episode) -> str:
-        """Convert episode steps into a readable transcript."""
+        """Convert episode steps into a readable transcript.
+
+        Two things here are load-bearing, both learned from a real deployment
+        where this method silently blinded the judge for its entire collection
+        period (see ``_tool_status`` and the ``TOOL_RESULT`` branch below).
+        """
         lines: list[str] = []
+        # Index in ``lines`` of the tool line still awaiting its result, so a
+        # TOOL_CALL/TOOL_RESULT *pair* collapses into one line instead of the
+        # result being dropped on the floor.
+        pending_tool: tuple[int, str] | None = None
+
         for step in episode.steps:
             if step.kind == StepKind.MESSAGE and step.content:
                 lines.append(f"[{step.agent_name}]: {step.content}")
+                pending_tool = None
             elif step.kind == StepKind.TOOL_CALL:
-                result_preview = str(step.tool_result)[:200] if step.tool_result else ""
-                status = "OK" if step.tool_succeeded else "FAILED"
-                lines.append(f"[Tool: {step.tool_name}] ({status}) -> {result_preview}")
+                result = _result_text(step)
+                lines.append(
+                    f"[Tool: {step.tool_name}] "
+                    f"({_tool_status(step.tool_succeeded)}) -> {result}"
+                )
+                # Only await a result if this step did not carry one itself.
+                pending_tool = (
+                    None if result else (len(lines) - 1, step.tool_name or "")
+                )
+            elif step.kind == StepKind.TOOL_RESULT:
+                # Adapters split a tool interaction one of two ways: everything
+                # on the TOOL_CALL step, or the call on TOOL_CALL and the output
+                # on a separate TOOL_RESULT step. This branch did not exist, so
+                # for every adapter of the second kind the judge saw each tool
+                # call as an empty, failed call — and duly reported answers as
+                # ungrounded because "no successful tool output is shown".
+                result = _result_text(step)
+                if (
+                    pending_tool is not None
+                    and (not step.tool_name or step.tool_name == pending_tool[1])
+                ):
+                    idx, name = pending_tool
+                    lines[idx] = (
+                        f"[Tool: {name}] "
+                        f"({_tool_status(step.tool_succeeded)}) -> {result}"
+                    )
+                    pending_tool = None
+                elif result or step.tool_name:
+                    lines.append(
+                        f"[Tool result: {step.tool_name}] "
+                        f"({_tool_status(step.tool_succeeded)}) -> {result}"
+                    )
             elif step.kind == StepKind.FACT_CHECK:
                 verdict = step.metadata.get("verdict", "?")
                 lines.append(f"[FactCheck: {step.agent_name}] {verdict}")
+                pending_tool = None
         return build_transcript(lines, self.max_transcript_chars)
 
     def _score_batch(

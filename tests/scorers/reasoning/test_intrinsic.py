@@ -242,3 +242,101 @@ class TestPlanQuality:
         plan = next(d for d in dims if d.name == "plan_quality")
         # Single step plan: present but not multi-step
         assert 0.0 < plan.value <= 0.5
+
+
+def _user(content: str) -> Step:
+    return Step(
+        kind=StepKind.MESSAGE,
+        agent_id="user",
+        agent_name="user",
+        content=content,
+    )
+
+
+class TestHumanTurnsExcluded:
+    """The user's prompt is not agent reasoning and must not be scored as it.
+
+    Regression tests for a real deployment where a two-message episode
+    ``[user question, agent answer]`` warned "Shallow reasoning: no reasoning
+    markers found in any message" on nearly every run. With the human turn in
+    the denominator such an episode could score at most 0.5 however well the
+    agent reasoned — and exactly 0.0 whenever the answer was concise, which is
+    a statement about the transcript's shape, not about the agent.
+    """
+
+    def test_user_turn_is_not_in_the_denominator(self):
+        ep = _make_episode(
+            steps=[
+                _user("What was revenue last year?"),
+                _msg("Agent1", "Because revenue rose, the forecast follows."),
+            ]
+        )
+        dims = IntrinsicReasoningScorer().score(ep)
+        depth = next(d for d in dims if d.name == "reasoning_depth")
+        # Was 0.5 — one of two "messages" carried markers.
+        assert depth.value == 1.0
+
+    def test_no_shallow_warning_when_the_agent_did_reason(self):
+        ep = _make_episode(
+            steps=[
+                _user("Why did margin move?"),
+                _msg("Agent1", "Since volume fell, therefore margin compressed."),
+            ]
+        )
+        issues = IntrinsicReasoningScorer().detect_issues(ep)
+        assert not any("no reasoning markers" in i.description for i in issues)
+
+    def test_a_genuinely_shallow_agent_still_warns(self):
+        """The fix must not silence the real signal."""
+        ep = _make_episode(
+            steps=[_user("Why?"), _msg("Agent1", "The data is here")]
+        )
+        issues = IntrinsicReasoningScorer().detect_issues(ep)
+        assert any("no reasoning markers" in i.description for i in issues)
+
+    def test_matching_is_case_insensitive(self):
+        ep = _make_episode(
+            steps=[
+                Step(
+                    kind=StepKind.MESSAGE,
+                    agent_id="User",
+                    agent_name="USER",
+                    content="a question",
+                ),
+                _msg("Agent1", "Therefore the answer follows."),
+            ]
+        )
+        dims = IntrinsicReasoningScorer().score(ep)
+        depth = next(d for d in dims if d.name == "reasoning_depth")
+        assert depth.value == 1.0
+
+    def test_human_speaker_also_excluded(self):
+        ep = _make_episode(
+            steps=[
+                Step(
+                    kind=StepKind.MESSAGE,
+                    agent_id="human",
+                    agent_name="human",
+                    content="a question",
+                ),
+                _msg("Agent1", "Therefore the answer follows."),
+            ]
+        )
+        dims = IntrinsicReasoningScorer().score(ep)
+        depth = next(d for d in dims if d.name == "reasoning_depth")
+        assert depth.value == 1.0
+
+    def test_a_user_only_episode_raises_no_reasoning_warning(self):
+        """Nothing to judge is not the same as judged and found shallow."""
+        ep = _make_episode(steps=[_user("just a question")])
+        issues = IntrinsicReasoningScorer().detect_issues(ep)
+        assert not any("no reasoning markers" in i.description for i in issues)
+
+    def test_an_agent_named_like_a_user_substring_is_kept(self):
+        """Only exact speaker names are excluded, not substrings."""
+        ep = _make_episode(
+            steps=[_msg("user_proxy_agent", "Therefore the answer follows.")]
+        )
+        dims = IntrinsicReasoningScorer().score(ep)
+        depth = next(d for d in dims if d.name == "reasoning_depth")
+        assert depth.value == 1.0

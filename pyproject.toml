@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "se-agent-eval"
-version = "0.3.0"
+version = "0.3.1"
 description = "Framework-agnostic LLM/Agent evaluator with RL support"
 readme = "README.md"
 license = "MIT"
