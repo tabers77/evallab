@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+  # Manual re-publish: use when a tag-push event was lost or the run never
+  # dispatched (a run stuck in "queued" with no jobs cannot be re-run).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.3.5). Must be on master."
+        required: true
+        type: string
 
 jobs:
   # Verify the tag is on master before publishing
@@ -11,17 +19,39 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       on_master: ${{ steps.check.outputs.on_master }}
+      tag: ${{ steps.check.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
       - id: check
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          if git branch -r --contains ${{ github.sha }} | grep -q 'origin/master'; then
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          case "$TAG" in
+            v*) ;;
+            *) echo "::error::Refusing to publish '$TAG' — expected a tag name starting with 'v'."; exit 1 ;;
+          esac
+
+          SHA=$(git rev-parse HEAD)
+
+          # Confirm the checked-out commit really is the tag, so a dispatch
+          # cannot publish an untagged branch head that happens to match v*.
+          git fetch --force --tags --quiet origin || true
+          if [ "$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)" != "$SHA" ]; then
+            echo "::error::'$TAG' is not a tag pointing at the checked-out commit $SHA."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          if git branch -r --contains "$SHA" | grep -q 'origin/master'; then
             echo "on_master=true" >> $GITHUB_OUTPUT
           else
             echo "on_master=false" >> $GITHUB_OUTPUT
-            echo "::warning::Tag is not on master branch. Skipping publish."
+            echo "::warning::Tag $TAG ($SHA) is not on master branch. Skipping publish."
           fi
 
   publish:
@@ -30,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ needs.check-branch.outputs.tag }}
 
       - uses: actions/setup-python@v6
         with:
@@ -40,6 +72,11 @@ jobs:
 
       - name: Build package
         run: python -m build
+
+      - name: Summarize artifacts
+        run: |
+          echo "Publishing from tag \`${{ needs.check-branch.outputs.tag }}\`:" >> $GITHUB_STEP_SUMMARY
+          for f in dist/*; do echo "- \`$(basename "$f")\`" >> $GITHUB_STEP_SUMMARY; done
 
       - name: Publish to Azure Artifacts
         env:

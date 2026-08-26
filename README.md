@@ -1293,6 +1293,23 @@ git push origin master --tags
 
 GitHub Actions will build the package and upload it to the `python-internal` feed. The tag **must** be on `master` — tags on other branches are ignored.
 
+Push the commit and the tag together (as above). Pushing `master` first and
+tagging later leaves a window where the new version is on `master` with no tag
+on the remote and no publish run.
+
+#### Re-publishing an existing tag
+
+The workflow also has a manual `workflow_dispatch` trigger. Use it when a
+tag-push event was lost or its run never dispatched — a run stuck in `queued`
+with no jobs cannot be re-run, because there are no jobs to re-run:
+
+**Actions → Publish to Azure Artifacts → Run workflow**, then enter the tag
+(e.g. `v0.3.5`).
+
+The same `master` check applies, and the dispatch is rejected unless the input
+names a real tag starting with `v`. Note that `twine` fails if that version is
+already on the feed — that failure is expected and means nothing was lost.
+
 ### Installing the package
 
 ```bash
