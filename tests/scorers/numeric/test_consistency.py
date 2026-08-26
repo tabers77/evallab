@@ -203,3 +203,51 @@ class TestNumericConsistencyScorer:
         issues = scorer.detect_issues(ep)
         assert len(issues) == 1
         assert issues[0].category == "Data Fabrication"
+
+
+class TestEvidenceIncompleteAbstains:
+    """An episode may declare its own tool evidence incomplete.
+
+    A conversation turn that summarises documents fetched in an *earlier* turn
+    carries figures this episode cannot trace. Observed in production: turn 3
+    of a 3-turn chat scored 0.0 with ~40 CRITICAL "Data Fabrication" issues,
+    every one of them a correct figure from turn 2 — the closest match was
+    always the single number in turn 3's own tool call.
+    """
+
+    def _episode(self, incomplete: bool):
+        from agent_eval.core.models import Episode
+
+        meta = {
+            "raw_events": [
+                {"type": "ToolCall", "tool": "t", "arguments": {}, "result": "868.62"}
+            ]
+        }
+        if incomplete:
+            meta["evidence_incomplete"] = True
+        return Episode(
+            episode_id="x",
+            steps=[],
+            source_framework="t",
+            final_answer="Kraftliner at 795.09 and Testliner at 762.70",
+            metadata=meta,
+        )
+
+    def test_issues_are_withheld(self):
+        scorer = NumericConsistencyScorer()
+        assert scorer.detect_issues(self._episode(True)) == []
+
+    def test_the_same_episode_reports_without_the_flag(self):
+        """Guard: the flag must be what silences it, not a broken detector."""
+        scorer = NumericConsistencyScorer()
+        assert len(scorer.detect_issues(self._episode(False))) > 0
+
+    def test_dimension_abstains_rather_than_scoring_zero(self):
+        """Absence of measurement must not read as a bad measurement."""
+        dims = NumericConsistencyScorer().score(self._episode(True))
+        assert len(dims) == 1
+        assert dims[0].abstained is True
+
+    def test_dimension_is_scored_without_the_flag(self):
+        dims = NumericConsistencyScorer().score(self._episode(False))
+        assert dims[0].abstained is False

@@ -27,6 +27,14 @@ class NumericConsistencyScorer:
         Minimum absolute value to consider (skip trivially small numbers).
     """
 
+    # Episode metadata key an adapter sets when the tool evidence in this
+    # episode is knowingly incomplete — most commonly a conversation turn whose
+    # answer draws on documents fetched in an *earlier* turn. Nothing this
+    # scorer can see distinguishes "cited from last turn" from "invented", so
+    # measuring is not possible and the honest answer is to abstain rather than
+    # report every carried-over figure as a fabrication.
+    EVIDENCE_INCOMPLETE_KEY = "evidence_incomplete"
+
     def __init__(self, tolerance: float = 0.05, min_value: float = 1.0) -> None:
         self.tolerance = tolerance
         self.min_value = min_value
@@ -40,6 +48,17 @@ class NumericConsistencyScorer:
 
         Value is the fraction of answer numbers that matched tool results.
         """
+        if self._evidence_incomplete(episode):
+            return [
+                ScoreDimension(
+                    name="numeric_accuracy",
+                    value=0.0,
+                    max_value=1.0,
+                    source=self.name,
+                    abstained=True,
+                )
+            ]
+
         fabrications = self._find_fabrications(episode)
         answer_numbers = self._get_answer_numbers(episode)
 
@@ -64,8 +83,19 @@ class NumericConsistencyScorer:
             )
         ]
 
+    def _evidence_incomplete(self, episode: Episode) -> bool:
+        return bool((episode.metadata or {}).get(self.EVIDENCE_INCOMPLETE_KEY))
+
     def detect_issues(self, episode: Episode) -> list[Issue]:
-        """Detect fabricated numbers as CRITICAL issues."""
+        """Detect fabricated numbers as CRITICAL issues.
+
+        Returns nothing when the episode declares its evidence incomplete: a
+        figure carried over from an earlier conversation turn is unverifiable
+        here by construction, and reporting it as fabricated was observed
+        turning correct multi-turn answers into grade F.
+        """
+        if self._evidence_incomplete(episode):
+            return []
         fabrications = self._find_fabrications(episode)
         issues: list[Issue] = []
 
