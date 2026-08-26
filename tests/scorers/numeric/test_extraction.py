@@ -260,3 +260,89 @@ class TestProductNamesAndPercentages:
         entries = extract_numbers_with_context("Kraftliner at 795.09 per tonne")
         assert len(entries) == 1
         assert entries[0]["in_percent_range"] is False
+
+
+class TestDerivedDeltaNotFabrication:
+    """A number the agent computed from figures it correctly quoted is not a
+    fabrication.
+
+    From a production orchestrate run (intelligence-platform, 2026-08-26). The
+    answer quoted 2024 revenue 113,851,699.92 and 2025 revenue 118,294,376.54
+    from `get_product_group_finances`, then wrote the delta as "+4.44m". That
+    delta was reported as CRITICAL "Data Fabrication ... closest
+    12,845,189.28, error 65.4%" and pulled a correct answer down to grade D,
+    while the platform's own fact-checker passed the same figure as a
+    "reasonable inference". Every YoY/variance answer hits this path.
+    """
+
+    ANSWER = (
+        "### YoY change, 2025 vs 2024\n"
+        "- **Revenue:** +4.44m, about **+3.9%**\n"
+        "- **EBITDA:** +4.59m, about **+19.7%**\n"
+        "\n"
+        "| 2024 | Liquid | 113,851,699.92 | 23,329,563.57 |\n"
+        "| 2025 | Liquid | 118,294,376.54 | 27,922,517.71 |\n"
+    )
+
+    def _entry(self, text, value):
+        for e in extract_numbers_with_context(text):
+            if abs(e["value"] - value) < 0.01:
+                return e
+        raise AssertionError(f"{value} not extracted from {text!r}")
+
+    def test_signed_delta_is_derived(self):
+        assert self._entry(self.ANSWER, 4_440_000.0)["is_derived"] is True
+        assert self._entry(self.ANSWER, 4_590_000.0)["is_derived"] is True
+
+    def test_quoted_tool_values_are_still_checked(self):
+        """The counterpart guard. A keyword must not leak onto neighbouring
+        figures: "about" on the EBITDA bullet sits within 60 characters of
+        113,851,699.92 in the table row below, so before the lookback was
+        clamped to the number's own line these verbatim tool values were
+        excused too — which would silence the scorer on the very numbers it
+        exists to verify."""
+        for value in (113_851_699.92, 23_329_563.57, 118_294_376.54, 27_922_517.71):
+            assert self._entry(self.ANSWER, value)["is_derived"] is False
+
+    def test_arithmetic_wording_without_a_sign(self):
+        for text in (
+            "Revenue increased by 4,442,676.62.",
+            "The difference is 4,442,676.62.",
+            "Revenue grew by 4,442,676.62 versus last year.",
+        ):
+            assert self._entry(text, 4_442_676.62)["is_derived"] is True
+
+    def test_change_verb_with_to_still_quotes_a_real_figure(self):
+        """The distinction a flat keyword list cannot express, and the reason
+        the verbs are matched only when followed by "by"/"of". "increased BY X"
+        is a delta; "increased TO X" quotes a tool value and must stay checked.
+        A bare "increase" alternative excuses both, which would silence the
+        scorer on most trend sentences."""
+        for text, value in (
+            ("Revenue increased to 118,294,376.54 in 2025.", 118_294_376.54),
+            ("Revenue rose to 118,294,376.54.", 118_294_376.54),
+        ):
+            assert self._entry(text, value)["is_derived"] is False
+
+    def test_metric_names_do_not_excuse_a_fabrication(self):
+        """Regression on the fix itself. "margin", "net", "higher" and "lower"
+        were in the first draft of the derived-keyword list; because they name
+        metrics rather than operations, they stopped genuinely invented figures
+        from being flagged."""
+        for text, value in (
+            ("Our EBITDA margin was 47,000,000.00 last year.", 47_000_000.0),
+            ("Net sales reached 88,000,000.00.", 88_000_000.0),
+            ("Spend was higher at 231,198,548.11.", 231_198_548.11),
+            ("Total spend was 231,198,548.11.", 231_198_548.11),
+        ):
+            assert self._entry(text, value)["is_derived"] is False
+
+    def test_a_leading_minus_is_not_treated_as_a_delta(self):
+        """Only "+" implies a computation. A tool legitimately returns negative
+        margins and losses that an answer quotes verbatim, so "-" must keep
+        being checked."""
+        # The extractor reports magnitude; the sign lives in the surrounding
+        # text, which is exactly what _has_signed_prefix inspects.
+        entry = self._entry("Result was -4,442,676.62 for the year.", 4_442_676.62)
+        assert entry["is_derived"] is False
+

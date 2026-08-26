@@ -31,7 +31,57 @@ _DERIVED_KEYWORDS_RE = re.compile(
     r"assume|potential|up\s+to|at\s+least)\b",
     re.IGNORECASE,
 )
-# Percentage range patterns like "5.5% to 7.5%" or "16.1%-19.1%"
+
+# ---------------------------------------------------------------------------
+# Arithmetic-result context.
+#
+# The approximation/projection vocabulary above had nothing for a number the
+# agent *computed* from figures it correctly quoted. Observed on a production
+# orchestrate run (intelligence-platform, 2026-08-26): the answer quoted 2024
+# revenue 113,851,699.92 and 2025 revenue 118,294,376.54 from the tool output,
+# then wrote the delta as "+4.44m". That delta was reported as CRITICAL
+# "Data Fabrication ... closest 12,845,189.28, error 65.4%" and pulled a
+# correct answer to grade D, while the platform's own fact-checker passed it as
+# a "reasonable inference". A delta is the most ordinary thing an analytical
+# answer computes, so this was never an edge case.
+#
+# Split into two patterns rather than one keyword list, because the two carry
+# different amounts of evidence:
+#
+#   1. Result NOUNS are inherently the output of an operation. "the difference
+#      is X", "YoY change ... X" — X cannot be a verbatim tool value.
+#
+#   2. Change VERBS are only evidence when paired with "by"/"of". This is the
+#      distinction a single keyword list cannot express, and getting it wrong
+#      is what makes the scorer permissive: "revenue increased BY 4,442,676.62"
+#      is a delta, but "revenue increased TO 118,294,376.54" quotes a real
+#      figure and must still be checked. A bare "increase" alternative excuses
+#      both.
+#
+# Metric names and bare comparatives are deliberately absent. An early draft
+# included "margin", "net", "higher" and "lower"; "Our EBITDA margin was
+# 47,000,000.00" then stopped being flagged. A keyword that also names a metric
+# silences the scorer on exactly the sentences it exists to check.
+_DELTA_NOUNS_RE = re.compile(
+    r"\b(?:change[ds]?|delta|difference|variance|uplift|"
+    r"yoy|y/y|year[- ]over[- ]year|year[- ]on[- ]year)\b",
+    re.IGNORECASE,
+)
+# Verb + "by"/"of", anchored to the end of the window so it must sit
+# immediately before the number.
+_DELTA_VERB_RE = re.compile(
+    r"\b(?:increas|decreas|grow|grew|grown|ros[e]|rise|rising|f[ae]ll|"
+    r"declin|drop|gain|improv|expand|shrank|shrunk|shrink)\w*\s+"
+    r"(?:by|of)\s*$",
+    re.IGNORECASE,
+)
+
+# An explicit leading "+" marks a computed change, never a quoted figure.
+# Tool results are raw values — they never carry a plus sign — so "+4.44m" is
+# by construction something the agent worked out rather than read. Only "+" is
+# treated this way: a leading "-" is ambiguous, because a tool legitimately
+# returns negative margins and losses that an answer would quote verbatim.
+_SIGNED_DELTA_RE = re.compile(r"\+\s*$")
 _PERCENT_RANGE_RE = re.compile(
     r"\d+(?:\.\d+)?%?\s*(?:to|-)\s*\d+(?:\.\d+)?%"
 )
@@ -129,6 +179,8 @@ def extract_numbers_with_context(text: str) -> list[dict]:
       - ``value``: the numeric value
       - ``is_approximate``: True if preceded by ``~`` or approximate keywords
       - ``is_derived``: True if context suggests a calculation or proposal
+        (approximation/projection wording, arithmetic-result wording such as
+        "YoY change" or "increase", or an explicit "+" sign on the number)
       - ``in_percent_range``: True if part of a percentage range pattern
     """
     results: list[dict] = []
@@ -147,8 +199,26 @@ def extract_numbers_with_context(text: str) -> list[dict]:
         return bool(_APPROX_PREFIX_RE.search(preceding))
 
     def _has_derived_context(pos: int) -> bool:
-        window = stripped[max(0, pos - 60) : pos]
-        return bool(_DERIVED_KEYWORDS_RE.search(window))
+        # Clamp the lookback to the number's own line. A raw 60-character
+        # window silently crosses line and table-row boundaries, so a keyword
+        # belonging to one bullet leaks onto the next one's figures: in the
+        # answer that motivated the delta keywords above, "about" on the
+        # "+4.59m, about +19.7%" bullet sat within 60 characters of the
+        # 113,851,699.92 in the table row below it, marking a verbatim tool
+        # value as derived. Keywords qualify the number they share a line with;
+        # anything further away is coincidence, and treating it as intent makes
+        # the scorer permissive exactly where it should bite.
+        line_start = stripped.rfind("\n", 0, pos) + 1
+        window = stripped[max(line_start, pos - 60) : pos]
+        return bool(
+            _DERIVED_KEYWORDS_RE.search(window)
+            or _DELTA_NOUNS_RE.search(window)
+            or _DELTA_VERB_RE.search(window)
+        )
+
+    def _has_signed_prefix(pos: int) -> bool:
+        """A "+" immediately before the number means the agent computed it."""
+        return bool(_SIGNED_DELTA_RE.search(stripped[max(0, pos - 3) : pos]))
 
     def _is_percent(end: int) -> bool:
         """A lone "3.6%" is a rate, not a figure quotable from a tool result.
@@ -161,7 +231,7 @@ def extract_numbers_with_context(text: str) -> list[dict]:
 
     def _classify(pos: int, end: int | None = None) -> dict:
         approx = _has_approx_prefix(pos)
-        derived = _has_derived_context(pos)
+        derived = _has_derived_context(pos) or _has_signed_prefix(pos)
         in_range = _in_range(pos) or (end is not None and _is_percent(end))
         return {
             "is_approximate": approx,
