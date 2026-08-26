@@ -226,3 +226,37 @@ class TestPatternsAreNotSilentlyCorrupted:
                 hex(ord(ch)) for ch in obj.pattern if ord(ch) < 32 and ch != "\n"
             ]
             assert not offenders, f"{name} contains control chars {offenders}"
+
+
+class TestProductNamesAndPercentages:
+    """More shapes that are not figures quoted from a tool result.
+
+    From production 0.3.3 runs: "extend the search to m365" was reported as a
+    fabricated 365.00, and "3.6%" as a fabricated 3.60 with closest match 4.00.
+    """
+
+    def test_glued_product_name(self):
+        assert extract_numbers_with_context("extend the search to m365") == []
+
+    def test_spaced_microsoft_product(self):
+        assert extract_numbers_with_context("the Microsoft 365 folder") == []
+
+    def test_quarter_label(self):
+        values = [e["value"] for e in extract_numbers_with_context("Q2 revenue rose")]
+        assert values == []
+
+    def test_single_percentage_is_flagged_as_percent(self):
+        entries = extract_numbers_with_context("a 3.6% rise year on year")
+        assert len(entries) == 1
+        assert entries[0]["value"] == 3.6
+        # Consumers skip percent entries, so this is what stops the false CRITICAL.
+        assert entries[0]["in_percent_range"] is True
+
+    def test_percent_ranges_still_flagged(self):
+        entries = extract_numbers_with_context("25% to 30% range")
+        assert all(e["in_percent_range"] for e in entries)
+
+    def test_a_plain_figure_is_not_a_percent(self):
+        entries = extract_numbers_with_context("Kraftliner at 795.09 per tonne")
+        assert len(entries) == 1
+        assert entries[0]["in_percent_range"] is False

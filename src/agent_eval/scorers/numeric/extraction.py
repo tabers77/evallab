@@ -49,6 +49,16 @@ _CITATION_RE = re.compile(r"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]")
 # Dates and clock times. "2026-08-25T09:13:06Z" was reported as a fabricated
 # 13, and "2026-04-28" as a fabricated 28 — a date is a label, never a
 # quantity the agent claimed to have read from a tool.
+# Product names carrying digits. "extend the search to m365" was reported as
+# a fabricated 365.00, and "Q2" as a fabricated 2 — a product or label is not
+# a quantity. Matches a digit run glued to letters (M365, GPT4, Q2) and the
+# common spaced Microsoft forms.
+_PRODUCT_RE = re.compile(
+    r"\b(?:microsoft|office|teams|sharepoint|windows|dynamics|azure)\s+\d{3,4}\b"
+    r"|\b[A-Za-z]+\d+\b"
+    , re.IGNORECASE,
+)
+
 _DATETIME_RE = re.compile(
     r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?"
     r"|\b\d{1,2}:\d{2}(?::\d{2})?\b"
@@ -68,6 +78,7 @@ def _mask_non_quantities(text: str) -> str:
         return " " * (match.end() - match.start())
 
     masked = _URL_RE.sub(_blank, text)
+    masked = _PRODUCT_RE.sub(_blank, masked)
     masked = _DATETIME_RE.sub(_blank, masked)
     return _CITATION_RE.sub(_blank, masked)
 
@@ -139,10 +150,19 @@ def extract_numbers_with_context(text: str) -> list[dict]:
         window = stripped[max(0, pos - 60) : pos]
         return bool(_DERIVED_KEYWORDS_RE.search(window))
 
-    def _classify(pos: int) -> dict:
+    def _is_percent(end: int) -> bool:
+        """A lone "3.6%" is a rate, not a figure quotable from a tool result.
+
+        Only percent *ranges* were excluded before, so a single percentage was
+        compared against raw tool numbers and reported as fabricated — observed
+        on "3.6%" (closest match 4.00) and "25% to 30%".
+        """
+        return stripped[end : end + 2].lstrip().startswith("%")
+
+    def _classify(pos: int, end: int | None = None) -> dict:
         approx = _has_approx_prefix(pos)
         derived = _has_derived_context(pos)
-        in_range = _in_range(pos)
+        in_range = _in_range(pos) or (end is not None and _is_percent(end))
         return {
             "is_approximate": approx,
             "is_derived": derived or approx,
@@ -155,7 +175,7 @@ def extract_numbers_with_context(text: str) -> list[dict]:
         num_str = match.group(1).replace(",", "")
         value = float(num_str)
         unit = match.group(2).lower()
-        info = _classify(match.start())
+        info = _classify(match.start(), match.end())
         info["value"] = value * _MBK_MULTIPLIERS[unit]
         results.append(info)
         mbk_positions.append((match.start(), match.end()))
@@ -167,7 +187,7 @@ def extract_numbers_with_context(text: str) -> list[dict]:
             continue
         num_str = match.group().replace(",", "")
         try:
-            info = _classify(match.start())
+            info = _classify(match.start(), match.end())
             info["value"] = float(num_str)
             results.append(info)
         except ValueError:

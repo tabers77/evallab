@@ -23,15 +23,19 @@ from agent_eval.scorers.llm_judge.prompts import (
 
 logger = logging.getLogger(__name__)
 
-# Maximum characters of a single tool result shown to the judge.
+# Floor for a single tool result. The per-result size is otherwise DERIVED from
+# the transcript budget and the number of results in the episode, because any
+# fixed number is wrong at one end or the other — measured on production runs:
 #
-# Measured, not guessed. At 200 the judge described real evidence as "a generic
-# HTML chunk" and scored `groundedness` 0.1-0.32 on answers whose figures were
-# correct, because a document-shaped tool result (a market newsletter, a mail
-# folder listing) puts its numbers well past the first 200 characters — the
-# preamble is markup. A five-tool episode used only ~29% of
-# `max_transcript_chars`, so the budget to fix this was already paid for.
-_RESULT_PREVIEW_CHARS = 1200
+#   1 tool call  @ 1200 fixed -> ~1.2k of an 8k budget used; the judge saw only
+#                                a document's markup preamble and called the
+#                                answer ungrounded. 6.8k of budget wasted.
+#   41 tool calls @ 1200 fixed -> 49k demanded, cap truncated it, and ~33 of the
+#                                41 results were invisible to the judge.
+#
+# Deriving it spends the whole budget in both cases and keeps every result at
+# least partly visible.
+_MIN_RESULT_CHARS = 120
 
 
 def _tool_status(succeeded: bool | None) -> str:
@@ -57,7 +61,7 @@ def _status_of(line: str) -> bool | None:
     return None
 
 
-def _result_text(step: Step) -> str:
+def _result_text(step: Step, limit: int) -> str:
     """Best available result text for a tool step, truncated for the prompt.
 
     Adapters put the output on ``tool_result`` or on ``content`` depending on
@@ -65,7 +69,7 @@ def _result_text(step: Step) -> str:
     """
     for value in (step.tool_result, step.content):
         if value:
-            return str(value)[:_RESULT_PREVIEW_CHARS]
+            return str(value)[:limit]
     return ""
 
 # The LLM callable is invoked with KEYWORD arguments only:
@@ -181,13 +185,14 @@ class LLMJudgeScorer:
         # TOOL_CALL/TOOL_RESULT *pair* collapses into one line instead of the
         # result being dropped on the floor.
         pending_tool: tuple[int, str] | None = None
+        limit = self._result_budget(episode)
 
         for step in episode.steps:
             if step.kind == StepKind.MESSAGE and step.content:
                 lines.append(f"[{step.agent_name}]: {step.content}")
                 pending_tool = None
             elif step.kind == StepKind.TOOL_CALL:
-                result = _result_text(step)
+                result = _result_text(step, limit)
                 lines.append(
                     f"[Tool: {step.tool_name}] "
                     f"({_tool_status(step.tool_succeeded)}) -> {result}"
@@ -204,7 +209,7 @@ class LLMJudgeScorer:
                 # for every adapter of the second kind the judge saw each tool
                 # call as an empty, failed call — and duly reported answers as
                 # ungrounded because "no successful tool output is shown".
-                result = _result_text(step)
+                result = _result_text(step, limit)
                 if (
                     pending_tool is not None
                     and (not step.tool_name or step.tool_name == pending_tool[1])
@@ -235,6 +240,37 @@ class LLMJudgeScorer:
                 lines.append(f"[FactCheck: {step.agent_name}] {verdict}")
                 pending_tool = None
         return build_transcript(lines, self.max_transcript_chars)
+
+    def _result_budget(self, episode: Episode) -> int:
+        """Characters to allow per tool result, derived from the budget.
+
+        Non-tool lines (messages, fact checks) are measured first and their
+        room reserved, then whatever remains is split evenly across the tool
+        interactions actually present. A ``TOOL_CALL``/``TOOL_RESULT`` pair
+        merges into one line, so pairs count once.
+        """
+        overhead = 0
+        tool_names: list[str] = []
+        seen_call = False
+        for step in episode.steps:
+            if step.kind == StepKind.MESSAGE and step.content:
+                overhead += len(step.agent_name or "") + len(step.content) + 6
+            elif step.kind == StepKind.FACT_CHECK:
+                overhead += len(step.agent_name or "") + 24
+            elif step.kind == StepKind.TOOL_CALL:
+                tool_names.append(step.tool_name or "")
+                seen_call = True
+            elif step.kind == StepKind.TOOL_RESULT and not seen_call:
+                tool_names.append(step.tool_name or "")
+            if step.kind not in (StepKind.TOOL_CALL, StepKind.TOOL_RESULT):
+                seen_call = False
+
+        if not tool_names:
+            return self.max_transcript_chars
+        # Per-line framing: "[Tool: name] (STATUS) -> " plus a newline.
+        overhead += sum(len(n) + 26 for n in tool_names)
+        room = self.max_transcript_chars - overhead
+        return max(_MIN_RESULT_CHARS, room // len(tool_names))
 
     def _score_batch(
         self, transcript: str, final_answer: str | None
