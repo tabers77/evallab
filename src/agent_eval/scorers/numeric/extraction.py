@@ -115,9 +115,42 @@ _DATETIME_RE = re.compile(
     r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b"
 )
 
+# Ordered-list markers. The "1." and "2." that open the steps of a numbered
+# list are labels, exactly like a citation marker, and they are the last shape
+# of prose punctuation still read as data after 0.3.2 masked citations.
+#
+# Observed on intelligence-platform run f5d923ada3cf (2026-09-01) against this
+# build, 0.3.6. A solve answer whose bound data source returned zero rows
+# correctly reported that it could not compute the figure, and closed with:
+#
+#     1. identify which `period_year` values exist
+#     2. rerun the contribution margin query for those years
+#
+# Those markers were the only 1 and 2 in the answer. Both were reported as
+# CRITICAL "Data Fabrication" -- `Number 1.00 not found in tool results
+# (closest: 609.00, error: 99.8%)` -- dropping numeric_accuracy to 0.6 and the
+# grade to 52.0, on an answer that invented nothing and said so. The platform's
+# own fact-checker returned PASS on the same text and the LLM judge scored
+# groundedness 0.98; this scorer was the only dissenting voice, and what it was
+# reading was list punctuation.
+#
+# `min_value=1.0` does not catch these: the guard is `abs(n) < min_value`, so
+# 1.0 and 2.0 both pass it. Raising min_value would silence real small
+# quantities instead, which is why this is a mask and not a threshold change.
+#
+# Deliberately narrow, so table rows and decimals survive:
+#   - the digits must OPEN the line (after optional quote/bullet indent), and
+#   - be followed by "." or ")" AND then whitespace.
+# "0.85 is the ratio" is untouched (no space after the dot) and the table row
+# "2024 | 113,851,699.92" is untouched (no dot or paren after 2024).
+_LIST_MARKER_RE = re.compile(
+    r"^[ \t>*+\-]*\(?\d{1,3}[.)](?=\s)",
+    re.MULTILINE,
+)
+
 
 def _mask_non_quantities(text: str) -> str:
-    """Blank out URL, date and citation regions, preserving every offset.
+    """Blank out URL, date, citation and list-marker regions, preserving offsets.
 
     Replaces with spaces rather than deleting: the callers classify each number
     by the text *around* its match position, so shifting offsets would silently
@@ -130,6 +163,7 @@ def _mask_non_quantities(text: str) -> str:
     masked = _URL_RE.sub(_blank, text)
     masked = _PRODUCT_RE.sub(_blank, masked)
     masked = _DATETIME_RE.sub(_blank, masked)
+    masked = _LIST_MARKER_RE.sub(_blank, masked)
     return _CITATION_RE.sub(_blank, masked)
 
 

@@ -346,3 +346,65 @@ class TestDerivedDeltaNotFabrication:
         entry = self._entry("Result was -4,442,676.62 for the year.", 4_442_676.62)
         assert entry["is_derived"] is False
 
+class TestOrderedListMarkersIgnored:
+    """The "1." opening a numbered step is punctuation, not a claimed figure.
+
+    Regression guard for intelligence-platform run f5d923ada3cf (2026-09-01,
+    against 0.3.6). A solve answer whose data source returned zero rows
+    correctly said it could not compute the figure and closed with a two-step
+    "next steps" list. Those two markers were the only 1 and 2 in the text, and
+    both were reported as CRITICAL "Data Fabrication" (`Number 1.00 not found
+    in tool results (closest: 609.00, error: 99.8%)`), taking numeric_accuracy
+    to 0.6 and the grade to 52.0 -- while the platform's own fact-checker
+    returned PASS on the same text and the judge scored groundedness 0.98.
+
+    The second half of this class matters as much as the first: the mask is
+    narrow on purpose, and a mask that also swallowed table rows or small
+    real quantities would trade a false positive for a false negative.
+    """
+
+    def test_the_production_answer_yields_no_numbers(self):
+        answer = (
+            "I cannot compute total contribution margin for the last two full years.\n"
+            "Recommended next steps:\n"
+            "1. identify which `period_year` values exist\n"
+            "2. rerun the contribution margin query for those years\n"
+        )
+        assert extract_numbers_with_context(answer) == []
+
+    def test_paren_markers_are_ignored(self):
+        assert extract_numbers_with_context("(1) first step\n(2) second step") == []
+
+    def test_markers_inside_a_blockquote_are_ignored(self):
+        assert extract_numbers_with_context("> 1. do this\n> 2. do that") == []
+
+    def test_a_real_figure_in_a_list_ITEM_still_extracts(self):
+        """Only the marker is masked, never the item's content."""
+        values = [
+            e["value"]
+            for e in extract_numbers_with_context("1. revenue was 113,851,699.92")
+        ]
+        assert values == [113851699.92]
+
+    def test_a_table_row_opening_with_a_year_is_untouched(self):
+        values = [
+            e["value"] for e in extract_numbers_with_context("| 2024 | 113,851,699.92 |")
+        ]
+        assert 2024.0 in values and 113851699.92 in values
+
+    def test_a_decimal_opening_a_line_is_untouched(self):
+        """"0.85" has no space after the dot, so it is not a marker."""
+        values = [e["value"] for e in extract_numbers_with_context("0.85 is the ratio")]
+        assert values == [0.85]
+
+    def test_small_quantities_in_prose_still_extract(self):
+        """The fix is a mask, not a min_value change -- 1 and 2 still count."""
+        values = [
+            e["value"]
+            for e in extract_numbers_with_context("We saw 2 outliers and 1 duplicate.")
+        ]
+        assert values == [2.0, 1.0]
+
+    def test_a_dash_bullet_with_a_count_is_untouched(self):
+        values = [e["value"] for e in extract_numbers_with_context("- 5 customers churned")]
+        assert values == [5.0]
