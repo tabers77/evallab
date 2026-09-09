@@ -251,3 +251,66 @@ class TestEvidenceIncompleteAbstains:
     def test_dimension_is_scored_without_the_flag(self):
         dims = NumericConsistencyScorer().score(self._episode(False))
         assert dims[0].abstained is False
+
+
+class TestGradeSpecCollisionStillCaught:
+    """A fabricated figure colliding with a grade spec must still be flagged.
+
+    The serious half of intelligence-platform GAP-046. Admitting paperboard
+    grade specs to the reference pool adds spurious *matches*, not only
+    spurious misses, and in this domain they land squarely inside the
+    plausible band for the metric being checked: observed EBITDA EUR/t in the
+    captured answer spans -14 to 243, while the specs injected by the grade
+    names alone are 80, 115, 260, 330, 370, 475, 480 and 665.
+
+    So a fabricated "EUR 262/t" matched "CKB 260 mN" within tolerance=0.05 and
+    passed silently on 0.3.7. Verified against the shipped 0.3.7 wheel while
+    diagnosing this: the episode below produced no issues at all.
+
+    Tolerance cannot fix this, because the contamination is on the reference
+    side rather than the answer side, and min_value cannot either, because the
+    specs sit inside the legitimate range of the metric.
+    """
+
+    TOOL_RESULT = "grade=CKB 260 mN | EBITDA_EUR=23127619.15 | TONS=181632.14"
+
+    def _episode(self, answer: str) -> Episode:
+        return _make_episode(
+            final_answer=answer,
+            tool_results=[{"tool": "profitability", "result": self.TOOL_RESULT}],
+        )
+
+    def test_a_figure_colliding_with_a_grade_spec_is_reported(self):
+        issues = NumericConsistencyScorer(tolerance=0.05).detect_issues(
+            self._episode("The margin was EUR 262/t.")
+        )
+        assert len(issues) == 1
+        assert issues[0].severity == Severity.CRITICAL
+        assert "262" in issues[0].description
+
+    def test_the_spec_is_not_offered_as_the_closest_match(self):
+        """The pool was cleaned, so no "closest:" can point at a stiffness.
+
+        Asserted positively -- the nearest surviving pool member is the tonnage
+        -- rather than as "260 is absent", which a different closest value
+        merely containing those digits would satisfy by accident.
+        """
+        issues = NumericConsistencyScorer(tolerance=0.05).detect_issues(
+            self._episode("The margin was EUR 262/t.")
+        )
+        assert "181,632.14" in issues[0].description
+        assert "260" not in issues[0].description
+
+    def test_a_sourced_figure_is_still_not_flagged(self):
+        """Guard: the pool must be cleaned, not emptied into all-fabricated."""
+        issues = NumericConsistencyScorer(tolerance=0.05).detect_issues(
+            self._episode("EBITDA was 23127619.15 EUR on 181632.14 tonnes.")
+        )
+        assert issues == []
+
+    def test_the_grade_name_in_the_answer_is_not_itself_a_fabrication(self):
+        """The answer names the grade too; masking both sides keeps it silent."""
+        issues = NumericConsistencyScorer(tolerance=0.05).detect_issues(
+            self._episode("CKB 260 mN delivered 23127619.15 EUR.")
+        )
+        assert issues == []

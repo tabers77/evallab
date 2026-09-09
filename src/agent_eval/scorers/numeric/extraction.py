@@ -149,8 +149,63 @@ _LIST_MARKER_RE = re.compile(
 )
 
 
+# Product-grade identifiers: a digit run bound to a spec unit. Paperboard
+# grades are named after a physical property -- "CLC/C DUPLEX 115 mN" is a
+# bending-stiffness rating, exactly as the "5" in "Chanel No. 5" is part of a
+# name rather than a count. The digits are a LABEL, not a figure the agent
+# claimed to have read from a tool.
+#
+# Observed on intelligence-platform, from a live capture off the deployed Dev
+# App Service (2026-09-02), a Tetra Pak FY2025-vs-FY2024 profitability answer:
+#
+#     Number 127.33 not found in tool results (closest: 115.00, error: 10.7%)
+#
+# 115 occurs exactly once in that answer, inside "CLC/C DUPLEX 115 mN". The
+# scorer offered a paper stiffness rating as the nearest match to a EUR/t
+# margin. That vocabulary supplies a whole spurious set from the grade names
+# alone: 80, 115, 260, 330, 370, 475, 480, 665.
+#
+# The second harm is the serious one, and it runs the other way. Adding specs
+# to the reference pool adds spurious *matches*, not only spurious misses, and
+# in this domain they land squarely inside the plausible band for the metric
+# being checked -- observed EBITDA EUR/t in that answer spans -14 to 243. A
+# fabricated "EUR 262/t" matches "260 mN" within tolerance=0.05 and passes
+# silently. Grammage/stiffness specs and EUR/t margins are both two-to-three
+# digit quantities, so the collision is structural, not coincidence.
+#
+# min_value cannot separate these -- the injected values sit inside the
+# legitimate range of the metric -- which is why this is a mask and not a
+# threshold change. The discriminator is the bound unit.
+#
+# Deliberately narrow:
+#   - only the exact SI symbol "mN", the sole unit across 119 occurrences in
+#     the captured corpus; no case folding, because "MN" is meganewton and a
+#     different unit,
+#   - [ \t]* rather than \s*, so the digits and the unit must share a line
+#     ("GT  195 mN" carries two spaces; a number ending one line above a stray
+#     "mN" is not a grade),
+#   - the lookbehind keeps the mask off a decimal's integer part, so
+#     "12.115 mN" is not read as a bare 115.
+#
+# KNOWN AND ACCEPTED: the unit is what makes a grade recognisable, so an answer
+# restating a spec as a bare number ("stiffness of 115") is not masked on the
+# answer side while the pool no longer carries it, and is reported as
+# fabricated. Keeping the unit is the normal phrasing, and the alternative --
+# masking the pool only -- produces that same false alarm in EVERY case rather
+# than in this rare one.
+_SPEC_UNIT_RE = re.compile(r"(?<![\d.,])\d{1,4}[ \t]*mN\b")
+
+
 def _mask_non_quantities(text: str) -> str:
-    """Blank out URL, date, citation and list-marker regions, preserving offsets.
+    """Blank out non-quantity regions (URL, product/grade, date, list, citation).
+
+    Applied to BOTH sides of the comparison -- the answer text and the tool
+    results -- by way of :func:`extract_numbers_with_context` and
+    :func:`extract_numbers_from_text`. Masking one side only is not a
+    partial fix but a distinct defect: a shape stripped from the answer and
+    left in the reference pool contributes spurious *matches* that wave real
+    fabrications through, and one stripped from the pool but left in the
+    answer is reported as a fabrication that never happened.
 
     Replaces with spaces rather than deleting: the callers classify each number
     by the text *around* its match position, so shifting offsets would silently
@@ -162,9 +217,20 @@ def _mask_non_quantities(text: str) -> str:
 
     masked = _URL_RE.sub(_blank, text)
     masked = _PRODUCT_RE.sub(_blank, masked)
+    masked = _SPEC_UNIT_RE.sub(_blank, masked)
     masked = _DATETIME_RE.sub(_blank, masked)
     masked = _LIST_MARKER_RE.sub(_blank, masked)
     return _CITATION_RE.sub(_blank, masked)
+
+
+def _strip_and_mask(text: str) -> str:
+    """Currency-strip, then mask -- the preparation BOTH extractors must share.
+
+    Extracted so the two cannot drift. That they had drifted is the defect this
+    helper exists to close: the answer side masked and the pool side did not,
+    so every mask added since 0.3.2 shipped half-applied.
+    """
+    return _mask_non_quantities(_CURRENCY_RE.sub("", text))
 
 
 def extract_numbers_from_text(text: str) -> list[float]:
@@ -180,7 +246,17 @@ def extract_numbers_from_text(text: str) -> list[float]:
     """
     numbers: list[float] = []
 
-    text = _CURRENCY_RE.sub("", text)
+    # Masked, exactly as the answer side is masked. This call is what makes the
+    # two sides symmetric. Without it the reference pool built by
+    # ``extract_numbers_from_tool_results`` carried every URL digit, date part,
+    # citation marker, product label and grade spec in the tool output, while
+    # the answer side had them stripped since 0.3.2 -- so every mask shipped
+    # half-applied. It also reconciles this function with
+    # ``_find_fabrications``: ``NumericConsistencyScorer`` takes the count from
+    # here as the denominator of ``numeric_accuracy`` and the fabrication list
+    # from there as the numerator, and before this the two were computed over
+    # different sets of numbers.
+    text = _strip_and_mask(text)
 
     # Pattern 1: M/B/K notation (process first)
     mbk_positions: list[tuple[int, int]] = []
@@ -218,7 +294,7 @@ def extract_numbers_with_context(text: str) -> list[dict]:
       - ``in_percent_range``: True if part of a percentage range pattern
     """
     results: list[dict] = []
-    stripped = _mask_non_quantities(_CURRENCY_RE.sub("", text))
+    stripped = _strip_and_mask(text)
 
     # Build a set of positions covered by percent-range patterns
     range_spans: list[tuple[int, int]] = []

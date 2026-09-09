@@ -408,3 +408,131 @@ class TestOrderedListMarkersIgnored:
     def test_a_dash_bullet_with_a_count_is_untouched(self):
         values = [e["value"] for e in extract_numbers_with_context("- 5 customers churned")]
         assert values == [5.0]
+
+
+class TestGradeSpecIdentifiersIgnored:
+    """A digit bound to a spec unit names a product; it is not a quantity.
+
+    Regression guard for intelligence-platform GAP-046, diagnosed from a live
+    capture off the deployed Dev App Service (2026-09-02) -- a Tetra Pak
+    FY2025-vs-FY2024 profitability answer whose Quality tab reported::
+
+        Number 127.33 not found in tool results (closest: 115.00, error: 10.7%)
+
+    115 occurs exactly once in that answer, inside the paperboard grade name
+    "CLC/C DUPLEX 115 mN". The scorer offered a bending-stiffness rating as the
+    nearest match to a EUR/t margin, and every "closest:" value on the tab was
+    drawn from the same contaminated pool.
+
+    The diagnostic noise is what got noticed; the false negatives are why this
+    is a bug rather than a blemish -- see TestGradeSpecCollisionStillCaught in
+    test_consistency.py for that half.
+
+    The second half of this class matters as much as the first. The mask keys
+    on the bound unit alone, so it must not reach a decimal's integer part, a
+    number that merely ends the line above a stray "mN", a longer token that
+    only starts with the unit, or a real figure sitting beside a grade name.
+    """
+
+    def test_the_production_grade_name_yields_no_number(self):
+        assert extract_numbers_from_text("CLC/C DUPLEX 115 mN") == []
+
+    def test_the_whole_captured_grade_vocabulary_is_masked(self):
+        """The eight spurious values GAP-046 traced to grade names alone."""
+        grades = "80 mN 115 mN 260 mN 330 mN 370 mN 475 mN 480 mN 665 mN"
+        assert extract_numbers_from_text(grades) == []
+
+    def test_grade_names_from_the_captured_corpus(self):
+        for grade in (
+            "CLC/A DUPLEX 665 mN",
+            "CLC/C DUPLEX 80 mN",
+            "CLC/L 200 mN",
+            "CLC/V 260 mN",
+            "DUPLEX TR 330 mN",
+            "GT  195 mN",
+        ):
+            assert extract_numbers_from_text(grade) == [], grade
+
+    def test_a_real_figure_beside_a_grade_name_still_extracts(self):
+        """The mask is on the identifier shape, not on rows containing letters."""
+        row = "EBITDA 23127619.15 for CLC/C DUPLEX 115 mN"
+        assert extract_numbers_from_text(row) == [23127619.15]
+
+    def test_the_answer_side_masks_it_too(self):
+        values = [
+            e["value"]
+            for e in extract_numbers_with_context("margin on CLC/C DUPLEX 115 mN")
+        ]
+        assert values == []
+
+    def test_a_decimals_integer_part_is_not_masked(self):
+        """The lookbehind keeps "12.115 mN" from reading as a bare 115."""
+        assert extract_numbers_from_text("12.115 mN") == [12.115]
+
+    def test_the_unit_must_share_a_line_with_the_digits(self):
+        """A tab-or-space class, not a whitespace class: a stray "mN" one
+        line below the digits is not a grade."""
+        text = """115
+mN"""
+        assert extract_numbers_from_text(text) == [115.0]
+
+    def test_a_longer_token_starting_with_the_unit_is_not_the_unit(self):
+        assert extract_numbers_from_text("115 mNx") == [115.0]
+
+    def test_case_is_not_folded_because_MN_is_a_different_unit(self):
+        """The symbol MN is meganewton, not millinewton -- masking it would
+        be a guess."""
+        assert extract_numbers_from_text("115 MN") == [115.0]
+
+    def test_an_unbound_spec_value_is_untouched(self):
+        """Grammage carries no "mN", so nothing about it is masked."""
+        assert extract_numbers_from_text("115 g/m2") == [115.0]
+
+
+class TestToolResultPoolIsMaskedSymmetrically:
+    """Every mask applies to the reference pool, not only to the answer.
+
+    Until GAP-046 exposed it, ``_mask_non_quantities`` was called from
+    ``extract_numbers_with_context`` (the answer side) and from nowhere else,
+    so ``extract_numbers_from_tool_results`` built the pool from raw text. Each
+    mask added since 0.3.2 therefore shipped half-applied: the shape was
+    stripped from the answer and left in the pool.
+
+    Half-applied is not half-fixed, it is a second defect. A shape left in the
+    pool contributes spurious *matches*, so a fabricated figure that lands
+    within tolerance of one is waved through -- the failure mode the scorer
+    exists to prevent.
+    """
+
+    @staticmethod
+    def _pool(result):
+        events = [{"type": "ToolCall", "tool": "t", "result": result}]
+        return extract_numbers_from_tool_results(events)["t"]
+
+    def test_grade_specs_do_not_reach_the_pool(self):
+        assert self._pool("CLC/C DUPLEX 115 mN, CKB 260 mN, WLC 330 mN") == []
+
+    def test_url_percent_escapes_do_not_reach_the_pool(self):
+        """0.3.2 masked these on the answer side only; 20 and 26 stayed here."""
+        assert self._pool("see Packaging%20Solutions%20%26%20Design.txt") == []
+
+    def test_date_parts_do_not_reach_the_pool(self):
+        """0.3.3 masked these on the answer side only."""
+        assert self._pool("captured 2026-08-25T09:13:06Z") == []
+
+    def test_citation_markers_do_not_reach_the_pool(self):
+        assert self._pool("sources [1][2][3]") == []
+
+    def test_real_tool_figures_still_reach_the_pool(self):
+        """Guard: the pool must be cleaned, never emptied."""
+        assert self._pool("REVENUE 283399382.94 VOLUME 15000") == [
+            283399382.94,
+            15000.0,
+        ]
+
+    def test_dict_results_are_unaffected(self):
+        """Dict values are read numerically and never pass through the mask."""
+        assert self._pool({"REVENUE": 283399382.94, "VOLUME": 15000}) == [
+            283399382.94,
+            15000.0,
+        ]
