@@ -62,8 +62,46 @@ class TestToolUsage:
         )
         scorer = IssueDetectorScorer()
         issues = scorer.detect_issues(ep)
+        no_tools = [i for i in issues if "no tools" in i.description.lower()]
+        # The default answer states no figures: noted, not penalised.
+        assert [i.severity for i in no_tools] == [Severity.INFO]
+
+    def test_tool_free_greeting_is_not_critical(self):
+        ep = _make_episode(
+            final_answer="I'm doing well, thanks - how can I help with your "
+            "negotiation prep today?"
+        )
+        issues = IssueDetectorScorer().detect_issues(ep)
+        assert not [i for i in issues if i.severity == Severity.CRITICAL]
+
+    def test_tool_free_answer_with_figures_is_critical(self):
+        ep = _make_episode(
+            final_answer="Total contribution margin was EUR 129,156,647 in 2025."
+        )
+        issues = IssueDetectorScorer().detect_issues(ep)
         critical = [i for i in issues if i.severity == Severity.CRITICAL]
         assert any("no tools" in i.description.lower() for i in critical)
+
+    def test_masked_digits_are_not_figures(self):
+        # A list marker and a date are punctuation, not quantities -- the same
+        # masks NumericConsistencyScorer applies.
+        ep = _make_episode(
+            final_answer="1. Ask about Q3 on 2025-03-01.\n2. Then compare."
+        )
+        issues = IssueDetectorScorer().detect_issues(ep)
+        assert not [i for i in issues if i.severity == Severity.CRITICAL]
+
+    def test_evidence_incomplete_stands_down(self):
+        ep = _make_episode(
+            final_answer="As agreed earlier, margin was 22.9% in 2026.",
+            metadata={"evidence_incomplete": True},
+        )
+        issues = IssueDetectorScorer().detect_issues(ep)
+        assert not [i for i in issues if i.severity == Severity.CRITICAL]
+
+    def test_no_tools_critical_still_costs_score(self):
+        ep = _make_episode(final_answer="Revenue was EUR 5.5M. " * 10)
+        assert IssueDetectorScorer().score(ep)[0].value <= 0.75
 
     def test_limited_tool_diversity(self):
         ep = _make_episode(

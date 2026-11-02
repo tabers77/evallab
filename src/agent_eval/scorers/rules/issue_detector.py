@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from agent_eval.core.models import Episode, StepKind
 from agent_eval.core.score import Issue, ScoreDimension, Severity
+from agent_eval.scorers.numeric.consistency import NumericConsistencyScorer
+from agent_eval.scorers.numeric.extraction import extract_numbers_from_text
 
 
 class IssueDetectorScorer:
@@ -234,13 +236,7 @@ class IssueDetectorScorer:
         failed = sum(1 for s in tool_steps if s.tool_succeeded is False)
 
         if total == 0:
-            issues.append(
-                Issue(
-                    severity=Severity.CRITICAL,
-                    category="Tool Usage",
-                    description="No tools were called - likely hallucination",
-                )
-            )
+            issues.append(self._no_tools_issue(episode))
         elif len(unique_tools) < 2 and total > 2:
             issues.append(
                 Issue(
@@ -262,6 +258,36 @@ class IssueDetectorScorer:
                 )
 
         return issues
+
+    @staticmethod
+    def _no_tools_issue(episode: Episode) -> Issue:
+        """Grade a tool-free answer by what it claims, not by the absence of tools.
+
+        "No tool call" is only evidence of fabrication when the answer states
+        figures: with no tool results, ``NumericConsistencyScorer`` has nothing
+        to compare against and reports none, so this rule is the only guard
+        left. A greeting or a capability reply has nothing to look up, and a
+        CRITICAL there capped every correct one at grade C (a greeting at D).
+
+        A continuation turn that declares its evidence incomplete carries its
+        figures over from an earlier turn -- unverifiable here, exactly as the
+        numeric scorer treats it -- so it stands down too.
+        """
+        incomplete = (episode.metadata or {}).get(
+            NumericConsistencyScorer.EVIDENCE_INCOMPLETE_KEY
+        )
+        if not incomplete and extract_numbers_from_text(episode.final_answer or ""):
+            return Issue(
+                severity=Severity.CRITICAL,
+                category="Tool Usage",
+                description="No tools were called but the answer states figures "
+                "- likely hallucination",
+            )
+        return Issue(
+            severity=Severity.INFO,
+            category="Tool Usage",
+            description="No tools were called; the answer states no figures to verify",
+        )
 
     # ------------------------------------------------------------------
     # Category 5: Efficiency
