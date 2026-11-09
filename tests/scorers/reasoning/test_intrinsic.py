@@ -103,8 +103,8 @@ class TestReasoningDepth:
         )
         scorer = IntrinsicReasoningScorer()
         issues = scorer.detect_issues(ep)
-        warnings = [i for i in issues if i.severity == Severity.WARNING]
-        assert any("shallow reasoning" in i.description.lower() for i in warnings)
+        infos = [i for i in issues if i.severity == Severity.INFO]
+        assert any("shallow reasoning" in i.description.lower() for i in infos)
 
 
 class TestReasoningCoherence:
@@ -292,7 +292,9 @@ class TestHumanTurnsExcluded:
             steps=[_user("Why?"), _msg("Agent1", "The data is here")]
         )
         issues = IntrinsicReasoningScorer().detect_issues(ep)
-        assert any("no reasoning markers" in i.description for i in issues)
+        shallow = [i for i in issues if "no reasoning markers" in i.description]
+        # Reported, at zero weight: a keyword count is cleared by keywords.
+        assert shallow and all(i.severity == Severity.INFO for i in shallow)
 
     def test_matching_is_case_insensitive(self):
         ep = _make_episode(

@@ -162,6 +162,60 @@ class TestBothLeversTogether:
         )
 
 
+class TestDetectedIssuesCannotBePaddedAway:
+    """Text with no substance must not clear a detected issue.
+
+    The bonuses above were one lever; deductions are the other. Measured on
+    0.3.9 by the intelligence-platform canaries (its GAP-119/GAP-130): "Final
+    answer is very short" and "Shallow reasoning: no reasoning markers" each
+    cost 5 points, and one filler sentence or one sentence of connectives
+    cleared them -- a 73-char greeting went from 85 (B) to 90 (A). These run
+    the real detectors, not a fixed issue list, because the lever is in what
+    gets detected.
+    """
+
+    _GREETING = "Hello! I can help with sales and margin questions."
+
+    @staticmethod
+    def _detected_score(answer: str) -> float:
+        from agent_eval.scorers.reasoning.intrinsic import IntrinsicReasoningScorer
+        from agent_eval.scorers.rules.issue_detector import IssueDetectorScorer
+
+        ep = Episode(
+            episode_id="probe",
+            source_framework="probe",
+            steps=[
+                Step(kind=StepKind.MESSAGE, agent_id="user", agent_name="user",
+                     content="hi", timestamp=_TS),
+                Step(kind=StepKind.MESSAGE, agent_id="a", agent_name="Agent",
+                     content=answer, timestamp=_TS),
+            ],
+            final_answer=answer,
+        )
+        issues = [
+            *IssueDetectorScorer().detect_issues(ep),
+            *IntrinsicReasoningScorer().detect_issues(ep),
+        ]
+        dims = RuleBasedScorer().score_with_issues(ep, issues)
+        return next(d for d in dims if d.name == "overall_score").value
+
+    def test_filler_does_not_clear_the_short_answer_issue(self):
+        lean = self._detected_score(self._GREETING)
+        padded = self._detected_score(
+            self._GREETING + " Feel free to ask anything at all, any time you like."
+        )
+        assert len(self._GREETING) < 100
+        assert padded <= lean, f"filler raised {lean} -> {padded}"
+
+    def test_connectives_do_not_clear_the_shallow_reasoning_issue(self):
+        lean = self._detected_score(self._GREETING)
+        padded = self._detected_score(
+            self._GREETING
+            + " Therefore, because of this, consequently it follows that we can start."
+        )
+        assert padded <= lean, f"connective keywords raised {lean} -> {padded}"
+
+
 class TestLegitimateSignalsStillWork:
     """Removing the bonuses must not flatten the scorer entirely."""
 

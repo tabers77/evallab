@@ -40,12 +40,12 @@ class TestAnswerQuality:
         critical = [i for i in issues if i.severity == Severity.CRITICAL]
         assert any("final answer" in i.description.lower() for i in critical)
 
-    def test_short_final_answer(self):
+    def test_short_final_answer_is_reported_at_zero_weight(self):
+        """Still visible, but INFO: length is not quality, and padding cleared it."""
         ep = _make_episode(final_answer="Short")
-        scorer = IssueDetectorScorer()
-        issues = scorer.detect_issues(ep)
-        warnings = [i for i in issues if i.severity == Severity.WARNING]
-        assert any("short" in i.description.lower() for i in warnings)
+        issues = IssueDetectorScorer().detect_issues(ep)
+        short = [i for i in issues if "short" in i.description.lower()]
+        assert short and all(i.severity == Severity.INFO for i in short)
 
 
 class TestToolUsage:

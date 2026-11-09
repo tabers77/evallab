@@ -150,11 +150,16 @@ class IntrinsicReasoningScorer:
         issues: list[Issue] = []
         msg_steps = _get_message_steps(episode)
 
-        # No reasoning markers in any message
+        # No reasoning markers in any message. INFO, not WARNING: the check
+        # is a keyword count, so one sentence of connectives ("therefore,
+        # because ... consequently") clears it with no change in substance.
+        # As a WARNING it cost 5 points through the deduction scorer, and a
+        # consumer that promotes high scorers (IP's decomposition templates,
+        # GAP-130) paid for that padding. It stays visible, at zero weight.
         if msg_steps and self._compute_reasoning_depth(msg_steps) == 0.0:
             issues.append(
                 Issue(
-                    severity=Severity.WARNING,
+                    severity=Severity.INFO,
                     category="Intrinsic Reasoning",
                     description="Shallow reasoning: no reasoning markers found in any message",
                 )

@@ -150,9 +150,14 @@ class IssueDetectorScorer:
                 )
             )
         elif len(episode.final_answer) < 100:
+            # INFO, not WARNING: length is not quality. A correct greeting or
+            # yes/no answer is short, and any filler sentence past 100 chars
+            # cleared the warning and its 5 points — measured: one sentence
+            # lifted a 73-char greeting from 85 (B) to 90 (A). Visible, zero
+            # weight. A missing answer above stays CRITICAL.
             issues.append(
                 Issue(
-                    severity=Severity.WARNING,
+                    severity=Severity.INFO,
                     category="Answer Quality",
                     description=f"Final answer is very short ({len(episode.final_answer)} chars)",
                 )
